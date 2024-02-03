@@ -16,15 +16,15 @@ def cli(args):
         if args.details:
             sysinfo.detail_info()
         elif args.boot_time:
-            sysinfo.enum(sysinfo.boot_time())
+            print(sysinfo.enum(sysinfo.boot_time()))
         elif args.memory:
-            sysinfo.enum(sysinfo.memory_info())
+            print(sysinfo.enum(sysinfo.memory_info()))
         elif args.swap:
-            sysinfo.enum(sysinfo.swap_info())
+            print(sysinfo.enum(sysinfo.swap_info()))
         elif args.cpu:
-            sysinfo.enum(sysinfo.cpu_info())
+            print(sysinfo.enum(sysinfo.cpu_info()))
         elif args.network:
-            sysinfo.enum(sysinfo.network_info())
+            print(sysinfo.enum(sysinfo.network_info()))
         else:
             sysinfo.info()
 
