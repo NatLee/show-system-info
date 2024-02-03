@@ -37,7 +37,7 @@ setuptools.setup(
         'Operating System :: OS Independent',
     ],
     python_requires='>=3.7',
-    install_requires=['psutil'],
+    install_requires=['psutil', 'py-cpuinfo'],
     extras_require={
         'dev': ['check-manifest'],
         # 'test': ['coverage'],
