@@ -8,7 +8,7 @@ setuptools.setup(
     author='Nat Lee',
     author_email='natlee.work@gmail.com',
     description='A simple package to get system spec information',
-    keywords='system, information, spec, hardware, software, os, platform, cpu, memory, disk, network, gpu, display, monitor, resolution, screen, monitor, heic, heif, png, convert, converter, cli, command, line, interface, tool, utility',
+    keywords='system, information, spec, hardware, software, os, platform, cpu, memory, disk, network, cli, command, line, interface, tool, utility',
     long_description=long_description,
     long_description_content_type='text/markdown',
     url='https://github.com/natlee/system-info',
