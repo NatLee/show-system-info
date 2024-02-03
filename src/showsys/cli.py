@@ -2,15 +2,15 @@ import traceback
 import argparse
 
 from . import __version__
-from .systeminfo import SystemInfo
+from .showsys import ShowSys
 
 def cli(args):
     """
-    Command-line interface for the systeminfo package.
+    Command-line interface for the ShowSys package.
 
     :param args: Parsed command-line arguments.
     """
-    sysinfo = SystemInfo()
+    sysinfo = ShowSys()
 
     try:
         if args.details:
@@ -39,12 +39,8 @@ def cli(args):
 
 def main():
     """
-    Main entry point for the `systeminfo` command-line interface.
+    Main entry point for the `showsys` command-line interface.
     """
-    register_heif_opener()
-
-    print(f'System Info v{__version__}')
-
     parser = argparse.ArgumentParser(description="Show system information.")
     parser.add_argument("-d", "--details", action="store_true", help="Show detailed system information.")
     parser.add_argument("-b", "--boot_time", action="store_true", help="Show system boot time.")

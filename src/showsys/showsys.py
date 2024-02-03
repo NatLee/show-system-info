@@ -8,7 +8,7 @@ from datetime import datetime
 import psutil
 import cpuinfo
 
-class SystemInfo:
+class ShowSys:
 
     def get_size(self, bytes, suffix="B") -> str:
         factor = 1024
