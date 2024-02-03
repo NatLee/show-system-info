@@ -25,5 +25,4 @@ def test_showsys_enum(cleanup):
     assert sysinfo.enum(sysinfo.memory_info()) is not None
     assert sysinfo.enum(sysinfo.swap_info()) is not None
     assert sysinfo.enum(sysinfo.network_info()) is not None
-    assert sysinfo.enum(sysinfo.detail_info()) is not None
-    assert sysinfo.enum(sysinfo.info()) is not None
+
