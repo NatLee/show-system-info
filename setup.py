@@ -4,18 +4,18 @@ with open('README.md', 'r', encoding='utf-8') as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name='System Info',
+    name='Show System Information',
     author='Nat Lee',
     author_email='natlee.work@gmail.com',
     description='A simple package to get system spec information',
     keywords='system, information, spec, hardware, software, os, platform, cpu, memory, disk, network, cli, command, line, interface, tool, utility',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/natlee/system-info',
+    url='https://github.com/natlee/show-system-info',
     project_urls={
-        'Documentation': 'https://github.com/natlee/system-info',
-        'Bug Reports': 'https://github.com/natlee/system-info/issues',
-        'Source Code': 'https://github.com/natlee/system-info'
+        'Documentation': 'https://github.com/natlee/show-system-info',
+        'Bug Reports': 'https://github.com/natlee/show-system-info/issues',
+        'Source Code': 'https://github.com/natlee/show-system-info'
     },
     package_dir={'': 'src'},
     packages=setuptools.find_packages(where='src'),
@@ -44,7 +44,7 @@ setuptools.setup(
     },
     entry_points={
         'console_scripts': [
-            'systeminfo=systeminfo.cli:main'
+            'showsys=showsys.cli:main'
         ]
     }
 )

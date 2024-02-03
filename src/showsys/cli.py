@@ -35,7 +35,7 @@ def cli(args):
         traceback.print_exc()
         print('==========================')
         print('Please report this issue with the full traceback.')
-        print('-> https://github.com/NatLee/system-info/issues')
+        print('-> https://github.com/NatLee/show-system-info/issues')
 
 def main():
     """
