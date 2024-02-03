@@ -4,7 +4,7 @@ with open('README.md', 'r', encoding='utf-8') as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name='Show System Information',
+    name='ShowSys',
     author='Nat Lee',
     author_email='natlee.work@gmail.com',
     description='A simple package to get system spec information',
