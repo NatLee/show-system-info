@@ -1,53 +1,105 @@
-import traceback
+"""The ``showsys`` command."""
 import argparse
+import json
+import sys
+import traceback
+from typing import Callable, List, NamedTuple, Optional, TextIO, Tuple
 
 from . import __version__
+from .collectors import collect
 from .showsys import ShowSys
 
-def cli(args):
+ISSUES_URL = 'https://github.com/NatLee/show-system-info/issues'
+
+
+class View(NamedTuple):
+    """One thing ``showsys`` can show: the option that selects it, its sections and its text."""
+    option: str
+    sections: Tuple[str, ...]
+    show_text: Callable[[ShowSys, argparse.Namespace], None]
+
+
+def _print_method(method: str) -> Callable[[ShowSys, argparse.Namespace], None]:
+    def show(sysinfo: ShowSys, args: argparse.Namespace) -> None:
+        print(sysinfo.enum(getattr(sysinfo, method)()))
+    return show
+
+
+SUMMARY = View('', ('system', 'memory', 'swap'), lambda sysinfo, args: sysinfo.info())
+
+# When several options are given, the first one in this order wins (as in ShowSys 1.0).
+VIEWS: Tuple[View, ...] = (
+    View('details', ('system', 'boot', 'cpu', 'memory', 'swap', 'network'),
+         lambda sysinfo, args: sysinfo.detail_info()),
+    View('boot_time', ('boot',), _print_method('boot_time')),
+    View('memory', ('memory',), _print_method('memory_info')),
+    View('swap', ('swap',), _print_method('swap_info')),
+    View('cpu', ('cpu',), _print_method('cpu_info')),
+    View('network', ('network',), _print_method('network_info')),
+)
+
+
+def pick_view(args: argparse.Namespace) -> View:
+    for view in VIEWS:
+        if getattr(args, view.option, None):
+            return view
+    return SUMMARY
+
+
+def _report(error: Exception, out: TextIO) -> None:
+    print(f'An unexpected error occurred: {error}', file=out)
+    print('Here are the details:', file=out)
+    print('==========================', file=out, flush=True)
+    traceback.print_exc()
+    print('==========================', file=out)
+    print('Please report this issue with the full traceback.', file=out)
+    print(f'-> {ISSUES_URL}', file=out)
+
+
+def cli(args: argparse.Namespace) -> None:
     """
     Command-line interface for the ShowSys package.
 
     :param args: Parsed command-line arguments.
     """
-    sysinfo = ShowSys()
-
+    # getattr: callers that build the Namespace themselves may not set the newer options.
+    as_json = getattr(args, 'json', False)
     try:
-        if args.details:
-            sysinfo.detail_info()
-        elif args.boot_time:
-            print(sysinfo.enum(sysinfo.boot_time()))
-        elif args.memory:
-            print(sysinfo.enum(sysinfo.memory_info()))
-        elif args.swap:
-            print(sysinfo.enum(sysinfo.swap_info()))
-        elif args.cpu:
-            print(sysinfo.enum(sysinfo.cpu_info()))
-        elif args.network:
-            print(sysinfo.enum(sysinfo.network_info()))
+        view = pick_view(args)
+        if as_json:
+            print(json.dumps(collect(*view.sections), indent=2))
         else:
-            sysinfo.info()
-
+            view.show_text(ShowSys(), args)
     except Exception as e:
-        print(f'An unexpected error occurred: {e}')
-        print('Here are the details:')
-        print('==========================')
-        traceback.print_exc()
-        print('==========================')
-        print('Please report this issue with the full traceback.')
-        print('-> https://github.com/NatLee/show-system-info/issues')
+        # Keep stdout clean for JSON readers: the report goes to stderr in that mode.
+        _report(e, sys.stderr if as_json else sys.stdout)
 
-def main():
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog='showsys', description='Show system information.')
+
+    sections = parser.add_argument_group(
+        'sections', 'Without an option, showsys prints a summary (system, memory and swap). '
+                    'Pick one option; with several, the first one in this list wins.')
+    sections.add_argument('-d', '--details', action='store_true', help='Show detailed system information.')
+    sections.add_argument('-b', '--boot_time', action='store_true', help='Show system boot time.')
+    sections.add_argument('-m', '--memory', action='store_true', help='Show memory information.')
+    sections.add_argument('-s', '--swap', action='store_true', help='Show swap information.')
+    sections.add_argument('-c', '--cpu', action='store_true', help='Show CPU information.')
+    sections.add_argument('-n', '--network', action='store_true', help='Show network information.')
+
+    output = parser.add_argument_group('output')
+    output.add_argument('-j', '--json', action='store_true',
+                        help='Print JSON instead of text: plain numbers (bytes, MHz, percent) and null '
+                             'for values this OS does not report.')
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> None:
     """
     Main entry point for the `showsys` command-line interface.
-    """
-    parser = argparse.ArgumentParser(description="Show system information.")
-    parser.add_argument("-d", "--details", action="store_true", help="Show detailed system information.")
-    parser.add_argument("-b", "--boot_time", action="store_true", help="Show system boot time.")
-    parser.add_argument("-m", "--memory", action="store_true", help="Show memory information.")
-    parser.add_argument("-s", "--swap", action="store_true", help="Show swap information.")
-    parser.add_argument("-c", "--cpu", action="store_true", help="Show CPU information.")
-    parser.add_argument("-n", "--network", action="store_true", help="Show network information.")
 
-    args = parser.parse_args()
+    :param argv: Command-line arguments without the program name. Defaults to ``sys.argv[1:]``.
+    """
+    args = build_parser().parse_args(argv)
     cli(args)
