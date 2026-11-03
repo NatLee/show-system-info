@@ -30,10 +30,10 @@ class View(NamedTuple):
     show_text: ShowText
 
 
-def _print_method(method: str) -> ShowText:
+def _print_section(section: str) -> ShowText:
     """Text of the options from ShowSys 1.0: exactly what they have always printed."""
     def show(sysinfo: ShowSys, args: argparse.Namespace) -> None:
-        print(sysinfo.enum(getattr(sysinfo, method)()))
+        print(sysinfo.enum(sysinfo._section(section)))
     return show
 
 
@@ -43,17 +43,18 @@ def _print_record(text: Callable[[Any], str], get: Callable[[], Any]) -> ShowTex
     return show
 
 
-SUMMARY = View('', ('system', 'memory', 'swap'), lambda sysinfo, args: sysinfo.info())
+SUMMARY = View('', render.SUMMARY_SECTIONS, lambda sysinfo, args: sysinfo.info())
+
+# The 1.0 options that show one section each, as (option, section).
+_SINGLE_SECTION_OPTIONS = (
+    ('boot_time', 'boot'), ('memory', 'memory'), ('swap', 'swap'), ('cpu', 'cpu'),
+    ('network', 'network'),
+)
 
 # When several options are given, the first one in this order wins (as in ShowSys 1.0).
 VIEWS: Tuple[View, ...] = (
-    View('details', ('system', 'boot', 'cpu', 'memory', 'swap', 'network'),
-         lambda sysinfo, args: sysinfo.detail_info()),
-    View('boot_time', ('boot',), _print_method('boot_time')),
-    View('memory', ('memory',), _print_method('memory_info')),
-    View('swap', ('swap',), _print_method('swap_info')),
-    View('cpu', ('cpu',), _print_method('cpu_info')),
-    View('network', ('network',), _print_method('network_info')),
+    View('details', render.DETAIL_SECTIONS, lambda sysinfo, args: sysinfo.detail_info()),
+    *(View(option, (section,), _print_section(section)) for option, section in _SINGLE_SECTION_OPTIONS),
     View('all', collectors.SECTIONS, lambda sysinfo, args: print(render.all_text(
         collectors.gather(collectors.SECTIONS, top=_top(args), sort_by=_sort(args)),
         _sort(args), collectors.nvml_installed()))),

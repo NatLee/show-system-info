@@ -4,7 +4,7 @@ The ``*_dict`` functions build the dicts that the :class:`showsys.ShowSys` metho
 always returned; :func:`enum` prints them. Their output must not change: scripts read it.
 """
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence
 
 from .collectors import DEFAULT_SORT, GPU_EXTRA, PROCESS_ORDERS
 from .models import (
@@ -179,6 +179,21 @@ def enum(info: Mapping[str, Any]) -> str:
     return output
 
 
+#: What `showsys` (and ShowSys.info()) and `showsys -d` (and detail_info()) show, in order.
+SUMMARY_SECTIONS = ('system', 'memory', 'swap')
+DETAIL_SECTIONS = ('system', 'boot', 'cpu', 'memory', 'swap', 'network')
+
+#: The 1.0 display dict of each section in DETAIL_SECTIONS, for --all.
+LEGACY_DICTS: Dict[str, Callable[[Any], Dict[str, Any]]] = {
+    'system': system_dict,
+    'boot': boot_dict,
+    'cpu': cpu_dict,
+    'memory': memory_dict,
+    'swap': swap_dict,
+    'network': network_dict,
+}
+
+
 def framed(*sections: Mapping[str, Any]) -> str:
     """Sections between two borders, as printed by ``info()`` and ``detail_info()``."""
     return BORDER + '\n' + ''.join(enum(section) for section in sections) + BORDER
@@ -322,13 +337,8 @@ def gpu_text(gpus: Optional[Sequence[GpuInfo]], nvml_installed: bool = True) -> 
 def all_text(records: Mapping[str, Any], sort_by: str = DEFAULT_SORT, nvml_installed: bool = True) -> str:
     """Every section between borders: the ``detail_info()`` text, then disks, sensors,
     processes and GPUs. ``records`` is what ``collectors.gather()`` returns for all sections."""
-    return (BORDER + '\n'
-            + enum(system_dict(records['system']))
-            + enum(boot_dict(records['boot']))
-            + enum(cpu_dict(records['cpu']))
-            + enum(memory_dict(records['memory']))
-            + enum(swap_dict(records['swap']))
-            + enum(network_dict(records['network']))
+    details = ''.join(enum(LEGACY_DICTS[name](records[name])) for name in DETAIL_SECTIONS)
+    return (BORDER + '\n' + details
             + disk_text(records['disk'])
             + sensors_text(records['sensors'])
             + processes_text(records['processes'], sort_by)

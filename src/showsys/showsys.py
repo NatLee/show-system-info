@@ -4,9 +4,20 @@ The data comes from :mod:`showsys.collectors` and the formatting from :mod:`show
 New code that wants numbers instead of strings can call those modules, or
 :func:`showsys.collect`, directly.
 """
-from typing import Any, Dict, Mapping
+from typing import Any, Callable, Dict, Mapping, Sequence
 
 from . import collectors, render
+
+
+#: The ShowSys method that returns each section's display dict (names from ShowSys 1.0).
+SECTION_METHODS: Dict[str, str] = {
+    'system': 'system_information',
+    'boot': 'boot_time',
+    'cpu': 'cpu_info',
+    'memory': 'memory_info',
+    'swap': 'swap_info',
+    'network': 'network_info',
+}
 
 
 class ShowSys:
@@ -45,23 +56,24 @@ class ShowSys:
         """
         return render.enum(info)
 
+    def _section(self, name: str) -> Dict[str, Any]:
+        """The display dict of one section, e.g. ``_section('memory')`` is ``memory_info()``."""
+        method: Callable[[], Dict[str, Any]] = getattr(self, SECTION_METHODS[name])
+        return method()
+
+    def _framed(self, sections: Sequence[str]) -> str:
+        return render.framed(*(self._section(name) for name in sections))
+
     def detail_info(self, show: bool = True) -> str:
         """System, boot time, CPU, memory, swap and network. Prints it unless ``show=False``."""
-        output = render.framed(
-            self.system_information(),
-            self.boot_time(),
-            self.cpu_info(),
-            self.memory_info(),
-            self.swap_info(),
-            self.network_info(),
-        )
+        output = self._framed(render.DETAIL_SECTIONS)
         if show:
             print(output)
         return output
 
     def info(self, show: bool = True) -> str:
         """System, memory and swap. Prints it unless ``show=False``."""
-        output = render.framed(self.system_information(), self.memory_info(), self.swap_info())
+        output = self._framed(render.SUMMARY_SECTIONS)
         if show:
             print(output)
         return output
