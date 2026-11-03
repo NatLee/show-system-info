@@ -41,7 +41,8 @@ def test_processor_brand_is_na_when_py_cpuinfo_cannot_detect_it(monkeypatch):
 
 
 def test_cpu_frequencies_are_na_when_the_os_does_not_report_them(monkeypatch, capsys):
-    monkeypatch.setattr(psutil, 'cpu_freq', lambda: None)
+    # raising=False: psutil has no cpu_freq() at all on some platforms.
+    monkeypatch.setattr(psutil, 'cpu_freq', lambda: None, raising=False)
 
     info = ShowSys().cpu_info()
     assert info['Max Frequency'] == 'N/A'
@@ -51,8 +52,17 @@ def test_cpu_frequencies_are_na_when_the_os_does_not_report_them(monkeypatch, ca
     assert 'Current Frequency: N/A' in _run_cli(monkeypatch, capsys, '-d')
 
 
+def test_cpu_frequencies_are_na_when_psutil_has_no_cpu_freq(monkeypatch, capsys):
+    # Apple Silicon Macs: psutil does not provide cpu_freq().
+    monkeypatch.delattr(psutil, 'cpu_freq', raising=False)
+
+    assert ShowSys().cpu_info()['Current Frequency'] == 'N/A'
+    assert 'Current Frequency: N/A' in _run_cli(monkeypatch, capsys, '-c')
+
+
 def test_cpu_frequencies_keep_the_readme_format_when_reported(monkeypatch):
-    monkeypatch.setattr(psutil, 'cpu_freq', lambda: CpuFreq(current=2100.0, min=0.0, max=2100.0))
+    monkeypatch.setattr(psutil, 'cpu_freq', lambda: CpuFreq(current=2100.0, min=0.0, max=2100.0),
+                        raising=False)
 
     info = ShowSys().cpu_info()
     assert info['Max Frequency'] == '2100.00Mhz'

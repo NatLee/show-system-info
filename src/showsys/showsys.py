@@ -50,7 +50,8 @@ class ShowSys:
         }
 
     def cpu_info(self) -> Dict[str, Union[str, int, float]]:
-        cpufreq = psutil.cpu_freq()
+        # psutil has no cpu_freq() on some platforms (e.g. Apple Silicon Macs).
+        cpufreq = psutil.cpu_freq() if hasattr(psutil, "cpu_freq") else None
         if cpufreq is None:
             # The OS does not report CPU frequencies (e.g. many ARM machines and virtual machines).
             max_freq = min_freq = current_freq = _NOT_AVAILABLE
