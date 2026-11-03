@@ -50,6 +50,23 @@ DEFAULT_TOP = 5
 GPU_EXTRA = 'showsys[gpu]'
 
 
+# What "this system cannot tell" looks like: a facility the OS lacks (NotImplementedError),
+# a failed or refused system call (OSError), or psutil's own errors such as AccessDenied.
+# Anything else is a bug and must reach the error report instead of turning into N/A.
+_UNAVAILABLE = (OSError, NotImplementedError, psutil.Error)
+
+
+def _optional(module: Any, name: str) -> Any:
+    """``module.<name>()``, or None when this platform lacks the function or cannot answer."""
+    read = getattr(module, name, None)
+    if read is None:
+        return None
+    try:
+        return read()
+    except _UNAVAILABLE:
+        return None
+
+
 def local_time(timestamp: float) -> str:
     """ISO 8601 local time with its UTC offset, to the second."""
     return datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone().isoformat(timespec='seconds')
@@ -216,7 +233,9 @@ def get_cpu(interval: float = DEFAULT_INTERVAL) -> CpuInfo:
 
     With ``interval=0`` the usage is measured since the previous call instead of waiting.
     """
-    freq = _cpu_freq()
+    # psutil has no cpu_freq() on some platforms (e.g. Apple Silicon Macs), and returns None
+    # when the OS does not report frequencies (e.g. many ARM machines and virtual machines).
+    freq = _optional(psutil, 'cpu_freq')
     # Start the total measurement now, so it covers the same window as the per-core one.
     psutil.cpu_percent(interval=None)
     per_core = psutil.cpu_percent(interval=interval, percpu=True)
@@ -239,27 +258,10 @@ def _mhz(value: Optional[float]) -> Optional[float]:
     return None if value is None else round(value, 2)
 
 
-def _cpu_freq() -> Any:
-    # psutil has no cpu_freq() on some platforms (e.g. Apple Silicon Macs), and returns None
-    # when the OS does not report frequencies (e.g. many ARM machines and virtual machines).
-    cpu_freq = getattr(psutil, 'cpu_freq', None)
-    if cpu_freq is None:
-        return None
-    try:
-        return cpu_freq()
-    except (OSError, NotImplementedError):
-        return None
-
-
 def _load_average() -> Optional[List[float]]:
     # Unix only. psutil emulates it on Windows, but the first readings there are always 0.
-    getloadavg = getattr(os, 'getloadavg', None)
-    if getloadavg is None:
-        return None
-    try:
-        return [round(value, 2) for value in getloadavg()]
-    except OSError:
-        return None
+    values = _optional(os, 'getloadavg')
+    return None if values is None else [round(value, 2) for value in values]
 
 
 def get_memory() -> MemoryInfo:
@@ -298,13 +300,20 @@ def get_disks() -> DiskInfo:
             free=usage.free,
             percent=usage.percent,
         ))
-    io = psutil.disk_io_counters()
-    # No disk statistics are available in some containers.
-    return DiskInfo(
-        partitions=partitions,
-        read_bytes=io.read_bytes if io else None,
-        write_bytes=io.write_bytes if io else None,
-    )
+    read_bytes, write_bytes = disk_io_totals()
+    return DiskInfo(partitions=partitions, read_bytes=read_bytes, write_bytes=write_bytes)
+
+
+def disk_io_totals() -> Tuple[Optional[int], Optional[int]]:
+    """Bytes read and written since boot over all disks; None in containers without statistics."""
+    io = _optional(psutil, 'disk_io_counters')
+    return (io.read_bytes, io.write_bytes) if io else (None, None)
+
+
+def net_io_totals() -> Tuple[Optional[int], Optional[int]]:
+    """Bytes sent and received since boot over all interfaces; None without statistics."""
+    io = _optional(psutil, 'net_io_counters')
+    return (io.bytes_sent, io.bytes_recv) if io else (None, None)
 
 
 def _address_family(family: int) -> Optional[str]:
@@ -321,7 +330,8 @@ def _address_family(family: int) -> Optional[str]:
 
 def get_network() -> NetworkInfo:
     """Interfaces with their addresses and link state, and bytes sent and received since boot."""
-    stats = _interface_stats()
+    # Link state is an extra: when the OS cannot tell, the addresses are still listed.
+    stats: Dict[str, Any] = _optional(psutil, 'net_if_stats') or {}
     interfaces = {}
     for name, addresses in psutil.net_if_addrs().items():
         records = []
@@ -337,32 +347,10 @@ def get_network() -> NetworkInfo:
             speed_mbps=(link.speed or None) if link else None,
             mtu=(link.mtu or None) if link else None,
         )
-    io = psutil.net_io_counters()
-    return NetworkInfo(
-        interfaces=interfaces,
-        bytes_sent=io.bytes_sent if io else None,
-        bytes_recv=io.bytes_recv if io else None,
-    )
+    bytes_sent, bytes_recv = net_io_totals()
+    return NetworkInfo(interfaces=interfaces, bytes_sent=bytes_sent, bytes_recv=bytes_recv)
 
 
-def _interface_stats() -> Dict[str, Any]:
-    try:
-        return psutil.net_if_stats()
-    except Exception:  # noqa: BLE001
-        # Link state is an extra: a platform quirk here must never hide the addresses.
-        return {}
-
-
-def _read_sensor(name: str) -> Any:
-    """The result of ``psutil.<name>()``, or None when this OS lacks it or it fails."""
-    read = getattr(psutil, name, None)
-    if read is None:
-        return None
-    try:
-        return read()
-    except Exception:  # noqa: BLE001
-        # Sensors are best effort: unusual hardware drivers make psutil raise all sorts of errors.
-        return None
 
 
 def _seconds_left(secsleft: Optional[int]) -> Optional[int]:
@@ -372,9 +360,9 @@ def _seconds_left(secsleft: Optional[int]) -> Optional[int]:
 
 def get_sensors() -> SensorsInfo:
     """Temperatures (Linux, FreeBSD), fans (Linux) and the battery (laptops on every OS)."""
-    temperatures = _read_sensor('sensors_temperatures')
-    fans = _read_sensor('sensors_fans')
-    battery = _read_sensor('sensors_battery')
+    temperatures = _optional(psutil, 'sensors_temperatures')
+    fans = _optional(psutil, 'sensors_fans')
+    battery = _optional(psutil, 'sensors_battery')
     return SensorsInfo(
         temperatures=None if temperatures is None else [
             Temperature(sensor=name, label=entry.label or None, current=entry.current,
