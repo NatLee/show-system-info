@@ -227,9 +227,22 @@ Not every OS reports everything. ShowSys shows `N/A` (`null` in JSON) for what's
 
 A few more cases:
 
-- The IP address shows `N/A` when the computer's host name can't be resolved (common on macOS).
+- The IP address shows `N/A` only when no network interface has a usable address (see below).
 - Disk read and write totals are missing in some containers.
 - `--top` leaves out processes the OS won't let you inspect, or shows `N/A` for their memory.
+
+### Which IP address?
+
+`IP-Address` (`ip_address` in JSON) is read from the network interfaces. There is no DNS lookup,
+so it no longer depends on whether the host name resolves. The rule:
+
+1. Candidates are the addresses of interfaces that are up, leaving out loopback (`127.0.0.1`, `::1`)
+   and link-local (`169.254.x.x`, `fe80::`) addresses.
+2. The candidate that the routing table uses for outbound traffic (the default route) wins. ShowSys
+   asks the OS which source address a UDP socket would use; nothing is sent.
+3. Without a default route, it takes the first candidate in the order the OS lists the interfaces.
+
+IPv4 comes first; an IPv6 address is shown only when there is no usable IPv4 address.
 
 ## Development
 

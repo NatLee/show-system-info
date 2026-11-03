@@ -10,7 +10,11 @@ import pytest
 
 from showsys import collectors, live
 
-from .fakes import FakeMachine
+from .fakes import FakeMachine, FakeSocket
+
+
+def _no_dns(name):
+    raise AssertionError(f'showsys looked up {name!r} in DNS; the IP address must come from the interfaces')
 
 
 @pytest.fixture
@@ -20,8 +24,8 @@ def fake_machine(monkeypatch):
     monkeypatch.setattr(platform, 'uname', lambda: machine.uname)
     monkeypatch.setattr(cpuinfo, 'get_cpu_info', lambda: machine.cpu_info)
     monkeypatch.setattr(collectors, '_quick_processor_brand', lambda: None)
-    monkeypatch.setattr(socket, 'gethostname', lambda: 'demo-host')
-    monkeypatch.setattr(socket, 'gethostbyname', lambda name: machine.ip_address)
+    monkeypatch.setattr(socket, 'socket', lambda *args, **kwargs: FakeSocket(machine, *args, **kwargs))
+    monkeypatch.setattr(socket, 'gethostbyname', _no_dns)
     monkeypatch.setattr(uuid, 'getnode', lambda: machine.mac_node)
     monkeypatch.setattr(psutil, 'boot_time', lambda: machine.boot_time)
     monkeypatch.setattr(psutil, 'cpu_count', machine.cpu_count)

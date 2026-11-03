@@ -6,6 +6,7 @@ Every value the operating system does not report becomes ``None``.
 System calls go through the module objects (``psutil.cpu_freq()``, not an imported name),
 so tests can replace them with ``monkeypatch.setattr(psutil, ...)``.
 """
+import ipaddress
 import os
 import platform
 import re
@@ -13,7 +14,7 @@ import socket
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import cpuinfo
 import psutil
@@ -48,7 +49,10 @@ def local_time(timestamp: float) -> str:
 
 
 def get_system() -> SystemInfo:
-    """Operating system, host name, CPU model and the addresses of this machine."""
+    """Operating system, host name, CPU model and the addresses of this machine.
+
+    ``ip_address`` follows the rule in :func:`primary_address`.
+    """
     uname = platform.uname()
     return SystemInfo(
         system=uname.system,
@@ -58,7 +62,7 @@ def get_system() -> SystemInfo:
         machine=uname.machine,
         processor=uname.processor or None,
         processor_brand=_processor_brand(),
-        ip_address=_ip_address(),
+        ip_address=primary_address(get_network().interfaces),
         mac_address=':'.join(re.findall('..', '%012x' % uuid.getnode())),
         python_version=platform.python_version(),
     )
@@ -96,12 +100,66 @@ def _processor_brand() -> Optional[str]:
     return _quick_processor_brand() or cpuinfo.get_cpu_info().get('brand_raw') or None
 
 
-def _ip_address() -> Optional[str]:
+# Where to "send" a UDP packet when asking the routing table which source address outbound
+# traffic uses, per address family, in order of preference. These are documentation addresses
+# (RFC 5737, RFC 3849) that never belong to a real host, and connect() on a UDP socket only looks
+# up the route: no packet leaves the machine. Any port works; 9 is the "discard" service.
+_ROUTE_PROBES: Dict[str, Tuple[int, Tuple[str, int]]] = {
+    'ipv4': (socket.AF_INET, ('192.0.2.1', 9)),
+    'ipv6': (socket.AF_INET6, ('2001:db8::1', 9)),
+}
+
+
+def _outbound_address(family: int, destination: Tuple[str, int]) -> Optional[str]:
+    """The source address the routing table picks for ``destination``, or None without a route."""
     try:
-        return socket.gethostbyname(socket.gethostname())
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.connect(destination)
+            return str(probe.getsockname()[0])
     except OSError:
-        # The host name is not in DNS or the hosts file (common on macOS and in containers).
         return None
+
+
+def _ip(address: str) -> Any:
+    # psutil adds the scope to IPv6 link-local addresses ("fe80::1%eth0"); ipaddress on
+    # Python < 3.9 does not accept it, and the scope is not part of the address itself.
+    return ipaddress.ip_address(address.split('%', 1)[0])
+
+
+def _reachable(address: str) -> bool:
+    """Whether another machine could reach this address: not loopback, link-local or unspecified."""
+    ip = _ip(address)
+    return not (ip.is_loopback or ip.is_link_local or ip.is_unspecified)
+
+
+def primary_address(interfaces: Mapping[str, NetworkInterface]) -> Optional[str]:
+    """The IP address of this machine that other machines would see, read from its interfaces.
+
+    The rule, for IPv4 first and IPv6 only when there is no usable IPv4 address:
+
+    1. Candidates are the addresses of interfaces that are up (or whose state is unknown),
+       leaving out loopback, link-local and unspecified addresses.
+    2. Of those, the one the routing table uses for outbound traffic (the default route) wins.
+    3. Without a default route, the first candidate in the order the OS lists its interfaces.
+
+    ``None`` only when no interface has a usable address. No DNS lookup is involved.
+    """
+    for family, (socket_family, destination) in _ROUTE_PROBES.items():
+        candidates = [
+            address.address
+            for interface in interfaces.values() if interface.is_up is not False
+            for address in interface.addresses
+            if address.family == family and _reachable(address.address)
+        ]
+        if not candidates:
+            continue
+        routed = _outbound_address(socket_family, destination)
+        if routed is not None:
+            for candidate in candidates:
+                if _ip(candidate) == _ip(routed):
+                    return candidate
+        return candidates[0]
+    return None
 
 
 def get_boot() -> BootInfo:
