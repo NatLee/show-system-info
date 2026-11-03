@@ -151,6 +151,7 @@ def _positive_int(text: str) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='showsys', description='Show system information.')
+    parser.add_argument('-V', '--version', action='version', version=f'showsys {__version__}')
 
     sections = parser.add_argument_group(
         'sections', 'Without an option, showsys prints a summary (system, memory and swap). '
