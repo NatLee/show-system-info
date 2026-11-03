@@ -135,6 +135,8 @@ def test_watch_cli_stops_quietly_on_ctrl_c(fake_machine, capsys, monkeypatch):
     (['--watch', '--top'], '--watch has its own columns'),
     (['--watch', '0'], 'expected a number of seconds above 0'),
     (['--watch', 'soon'], 'expected a number of seconds above 0'),
+    (['--watch', 'inf'], 'expected a number of seconds above 0'),
+    (['--watch', 'nan'], 'expected a number of seconds above 0'),
     (['--watch', '--count', '0'], 'expected a whole number above 0'),
 ])
 def test_watch_cli_rejects_bad_combinations(capsys, argv, message):

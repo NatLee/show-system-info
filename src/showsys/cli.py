@@ -2,6 +2,7 @@
 import argparse
 import io
 import json
+import math
 import os
 import sys
 import traceback
@@ -135,7 +136,7 @@ def _positive_float(text: str) -> float:
         value = float(text)
     except ValueError:
         value = 0.0
-    if not value > 0:
+    if not (value > 0 and math.isfinite(value)):
         raise argparse.ArgumentTypeError(f'expected a number of seconds above 0, got {text!r}')
     return value
 
