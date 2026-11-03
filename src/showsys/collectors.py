@@ -15,7 +15,7 @@ import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 import cpuinfo
 import psutil
@@ -42,6 +42,12 @@ from .models import (
 
 #: Seconds `get_cpu()` waits to measure CPU usage, same as ShowSys 1.0.
 DEFAULT_INTERVAL = 1.0
+
+#: How many processes `get_processes()` and `showsys --top` list unless told otherwise.
+DEFAULT_TOP = 5
+
+#: The optional extra that installs NVIDIA's NVML bindings, as named in setup.py.
+GPU_EXTRA = 'showsys[gpu]'
 
 
 def local_time(timestamp: float) -> str:
@@ -389,14 +395,14 @@ def get_sensors() -> SensorsInfo:
 
 def _import_nvml() -> Any:
     try:
-        import pynvml  # From the optional nvidia-ml-py package: pip install "showsys[gpu]"
+        import pynvml  # From the optional nvidia-ml-py package, see GPU_EXTRA.
     except ImportError:
         return None
     return pynvml
 
 
 def nvml_installed() -> bool:
-    """Whether the optional NVIDIA library (``showsys[gpu]``) is installed."""
+    """Whether the optional NVIDIA library (:data:`GPU_EXTRA`) is installed."""
     return _import_nvml() is not None
 
 
@@ -406,7 +412,7 @@ def _text(value: Any) -> str:
 
 
 def get_gpus() -> Optional[List[GpuInfo]]:
-    """NVIDIA GPUs, through the optional ``showsys[gpu]`` extra.
+    """NVIDIA GPUs, through the optional :data:`GPU_EXTRA`.
 
     ``None`` when the extra is not installed or no NVIDIA driver is loaded;
     a value a GPU does not support (e.g. power on some laptops) is ``None``.
@@ -452,8 +458,20 @@ def get_gpus() -> Optional[List[GpuInfo]]:
         ask(nvml.nvmlShutdown)
 
 
-#: Orders accepted by :func:`get_processes`.
-PROCESS_SORT_KEYS: Tuple[str, ...] = ('cpu', 'memory')
+class ProcessOrder(NamedTuple):
+    """One way to rank processes: a name for people and the value to rank by, biggest first."""
+    label: str
+    key: Callable[[ProcessInfo], float]
+
+
+#: Orders accepted by :func:`get_processes` and ``--sort``; the first one is the default.
+PROCESS_ORDERS: Dict[str, ProcessOrder] = {
+    'cpu': ProcessOrder('CPU', lambda p: p.cpu_percent),
+    # Processes the OS hides the memory of rank last.
+    'memory': ProcessOrder('memory', lambda p: p.memory_rss or 0),
+}
+PROCESS_SORT_KEYS: Tuple[str, ...] = tuple(PROCESS_ORDERS)
+DEFAULT_SORT = PROCESS_SORT_KEYS[0]
 
 
 class _ProcessSampler:
@@ -500,10 +518,7 @@ class _ProcessSampler:
                 memory_percent=memory_percent,
                 memory_rss=memory_rss,
             ))
-        if sort_by == 'memory':
-            found.sort(key=lambda p: p.memory_rss or 0, reverse=True)
-        else:
-            found.sort(key=lambda p: p.cpu_percent, reverse=True)
+        found.sort(key=PROCESS_ORDERS[sort_by].key, reverse=True)
         return found[:limit]
 
 
@@ -514,9 +529,11 @@ def _check_top(limit: int, sort_by: str) -> None:
         raise ValueError(f"unknown sort key {sort_by!r}; choose from {', '.join(PROCESS_SORT_KEYS)}")
 
 
-def get_processes(limit: int = 5, sort_by: str = 'cpu',
+def get_processes(limit: int = DEFAULT_TOP, sort_by: str = DEFAULT_SORT,
                   interval: float = DEFAULT_INTERVAL) -> List[ProcessInfo]:
-    """The ``limit`` busiest processes by ``'cpu'`` or ``'memory'``, CPU measured over ``interval``.
+    """The ``limit`` busiest processes, ranked by one of :data:`PROCESS_ORDERS`.
+
+    CPU use is measured over ``interval`` seconds.
 
     Processes the OS does not let this user inspect are left out, or listed without memory.
     """
@@ -540,7 +557,7 @@ def _check_sections(sections: Sequence[str]) -> List[str]:
 
 
 def gather(sections: Sequence[str] = (), interval: float = DEFAULT_INTERVAL,
-           top: int = 5, sort_by: str = 'cpu') -> Dict[str, Any]:
+           top: int = DEFAULT_TOP, sort_by: str = DEFAULT_SORT) -> Dict[str, Any]:
     """Like :func:`collect`, but returns the records themselves instead of dicts."""
     wanted = _check_sections(sections)
     sampler = None
@@ -579,7 +596,7 @@ def to_jsonable(value: Any) -> Any:
 
 
 def collect(*sections: str, interval: float = DEFAULT_INTERVAL,
-            top: int = 5, sort_by: str = 'cpu') -> Dict[str, Any]:
+            top: int = DEFAULT_TOP, sort_by: str = DEFAULT_SORT) -> Dict[str, Any]:
     """Collect sections of system information as plain dicts, ready for ``json.dumps``.
 
     Example::

@@ -18,8 +18,6 @@ ISSUES_URL = 'https://github.com/NatLee/show-system-info/issues'
 # Exit statuses, decided only in cli(). argparse exits with 2 on its own for usage errors.
 EXIT_OK = 0
 EXIT_FAILURE = 1
-DEFAULT_TOP = 5
-
 
 # Prints a view as text. ShowSys.info() and detail_info() also return the text; it is ignored.
 ShowText = Callable[[ShowSys, argparse.Namespace], object]
@@ -69,11 +67,11 @@ VIEWS: Tuple[View, ...] = (
 
 
 def _top(args: argparse.Namespace) -> int:
-    return getattr(args, 'top', None) or DEFAULT_TOP
+    return getattr(args, 'top', None) or collectors.DEFAULT_TOP
 
 
 def _sort(args: argparse.Namespace) -> str:
-    return getattr(args, 'sort', None) or 'cpu'
+    return getattr(args, 'sort', None) or collectors.DEFAULT_SORT
 
 
 def pick_view(args: argparse.Namespace) -> View:
@@ -177,23 +175,25 @@ def build_parser() -> argparse.ArgumentParser:
                           help='Show disk partitions, their usage, and bytes read and written since boot.')
     sections.add_argument('--sensors', action='store_true',
                           help='Show temperatures, fans and battery, where this OS reports them.')
-    sections.add_argument('--top', nargs='?', const=DEFAULT_TOP, type=_positive_int, metavar='N',
-                          help=f'Show the N busiest processes (default {DEFAULT_TOP}), '
-                               f'CPU measured over one second.')
+    sections.add_argument('--top', nargs='?', const=collectors.DEFAULT_TOP, type=_positive_int, metavar='N',
+                          help=f'Show the N busiest processes (default {collectors.DEFAULT_TOP}), '
+                               f'CPU measured over {collectors.DEFAULT_INTERVAL:g} s.')
     sections.add_argument('--gpu', action='store_true',
-                          help='Show NVIDIA GPUs (needs the extra: pip install "showsys[gpu]").')
+                          help=f'Show NVIDIA GPUs (needs the extra: pip install "{collectors.GPU_EXTRA}").')
 
     output = parser.add_argument_group('output')
-    output.add_argument('--sort', choices=collectors.PROCESS_SORT_KEYS, default='cpu',
-                        help='Order --top and --all processes by CPU or memory use (default: cpu).')
+    output.add_argument('--sort', choices=collectors.PROCESS_SORT_KEYS, default=collectors.DEFAULT_SORT,
+                        help=f'Order the processes of --top and --all (default: {collectors.DEFAULT_SORT}).')
     output.add_argument('-j', '--json', action='store_true',
                         help='Print JSON instead of text: plain numbers (bytes, MHz, percent) and null '
                              'for values this OS does not report.')
 
     live_mode = parser.add_argument_group('live mode')
-    live_mode.add_argument('-w', '--watch', nargs='?', const=1.0, type=_positive_float, metavar='SECONDS',
-                           help='Print CPU, memory and swap use and network and disk throughput every '
-                                'SECONDS (default 1) until Ctrl+C. With --json: one JSON object per line.')
+    live_mode.add_argument('-w', '--watch', nargs='?', const=live.DEFAULT_WATCH_INTERVAL, type=_positive_float,
+                           metavar='SECONDS',
+                           help=f'Print CPU, memory and swap use and network and disk throughput every '
+                                f'SECONDS (default {live.DEFAULT_WATCH_INTERVAL:g}) until Ctrl+C. '
+                                f'With --json: one JSON object per line.')
     live_mode.add_argument('--count', type=_positive_int, metavar='N',
                            help='Stop --watch after N readings.')
     return parser

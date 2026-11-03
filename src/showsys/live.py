@@ -7,6 +7,9 @@ import psutil
 from .collectors import local_time
 from .models import Rates
 
+#: Seconds between readings unless told otherwise.
+DEFAULT_WATCH_INTERVAL = 1.0
+
 _Totals = Tuple[Optional[int], Optional[int]]
 
 
@@ -31,7 +34,7 @@ def _rate(new: Optional[int], old: Optional[int], seconds: float) -> Optional[fl
     return round(max(0, new - old) / seconds, 1)
 
 
-def watch(interval: float = 1.0, count: Optional[int] = None) -> Iterator[Rates]:
+def watch(interval: float = DEFAULT_WATCH_INTERVAL, count: Optional[int] = None) -> Iterator[Rates]:
     """Yield a reading every ``interval`` seconds, ``count`` times or until you stop iterating.
 
     Each reading covers the time since the previous one::

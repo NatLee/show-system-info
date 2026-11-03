@@ -6,6 +6,7 @@ always returned; :func:`enum` prints them. Their output must not change: scripts
 from datetime import datetime, timedelta
 from typing import Any, Collection, Dict, List, Mapping, Optional, Sequence
 
+from .collectors import DEFAULT_SORT, GPU_EXTRA, PROCESS_ORDERS
 from .models import (
     Battery,
     BootInfo,
@@ -243,10 +244,9 @@ def sensors_text(info: SensorsInfo) -> str:
     return '\n'.join(lines) + '\n'
 
 
-def processes_text(processes: Sequence[ProcessInfo], sort_by: str = 'cpu') -> str:
+def processes_text(processes: Sequence[ProcessInfo], sort_by: str = DEFAULT_SORT) -> str:
     if not processes:
         return f'Processes: {NA}\n'
-    order = 'memory' if sort_by == 'memory' else 'CPU'
     rows = [[
         str(p.pid),
         (p.name or NA)[:30],
@@ -255,11 +255,11 @@ def processes_text(processes: Sequence[ProcessInfo], sort_by: str = 'cpu') -> st
         size_or_na(p.memory_rss),
         p.username or NA,
     ] for p in processes]
-    return f'Top {len(processes)} processes by {order}:\n' + table(
+    return f'Top {len(processes)} processes by {PROCESS_ORDERS[sort_by].label}:\n' + table(
         ['PID', 'NAME', 'CPU%', 'MEM%', 'MEMORY', 'USER'], rows, right={0, 2, 3, 4})
 
 
-GPU_EXTRA_HINT = 'NVIDIA GPUs only; install the extra: pip install "showsys[gpu]"'
+GPU_EXTRA_HINT = f'NVIDIA GPUs only; install the extra: pip install "{GPU_EXTRA}"'
 
 
 def gpu_text(gpus: Optional[Sequence[GpuInfo]], nvml_installed: bool = True) -> str:
@@ -286,7 +286,7 @@ def gpu_text(gpus: Optional[Sequence[GpuInfo]], nvml_installed: bool = True) -> 
     return '\n'.join(lines) + '\n'
 
 
-def all_text(records: Mapping[str, Any], sort_by: str = 'cpu', nvml_installed: bool = True) -> str:
+def all_text(records: Mapping[str, Any], sort_by: str = DEFAULT_SORT, nvml_installed: bool = True) -> str:
     """Every section between borders: the ``detail_info()`` text, then disks, sensors,
     processes and GPUs. ``records`` is what ``collectors.gather()`` returns for all sections."""
     return (BORDER + '\n'
