@@ -394,11 +394,6 @@ def nvml_installed() -> bool:
     return _import_nvml() is not None
 
 
-def _text(value: Any) -> str:
-    # Old nvidia-ml-py versions return bytes.
-    return value.decode() if isinstance(value, bytes) else str(value)
-
-
 def get_gpus() -> Optional[List[GpuInfo]]:
     """NVIDIA GPUs, through the optional :data:`GPU_EXTRA`.
 
@@ -430,8 +425,8 @@ def get_gpus() -> Optional[List[GpuInfo]]:
             milliwatts = ask(nvml.nvmlDeviceGetPowerUsage, handle)
             gpus.append(GpuInfo(
                 index=index,
-                name=_text(nvml.nvmlDeviceGetName(handle)),
-                driver_version=None if driver is None else _text(driver),
+                name=nvml.nvmlDeviceGetName(handle),
+                driver_version=driver,
                 memory_total=memory.total if memory else None,
                 memory_used=memory.used if memory else None,
                 memory_free=memory.free if memory else None,
