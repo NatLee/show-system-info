@@ -52,6 +52,8 @@ VIEWS: Tuple[View, ...] = (
     View('sensors', ('sensors',), _print_record(render.sensors_text, collectors.get_sensors)),
     View('top', ('processes',), lambda sysinfo, args: print(render.processes_text(
         collectors.get_processes(_top(args), _sort(args)), _sort(args)))),
+    View('gpu', ('gpu',), lambda sysinfo, args: print(render.gpu_text(
+        collectors.get_gpus(), collectors.nvml_installed()))),
 )
 
 
@@ -128,6 +130,8 @@ def build_parser() -> argparse.ArgumentParser:
     sections.add_argument('--top', nargs='?', const=DEFAULT_TOP, type=_positive_int, metavar='N',
                           help=f'Show the N busiest processes (default {DEFAULT_TOP}), '
                                f'CPU measured over one second.')
+    sections.add_argument('--gpu', action='store_true',
+                          help='Show NVIDIA GPUs (needs the extra: pip install "showsys[gpu]").')
 
     output = parser.add_argument_group('output')
     output.add_argument('--sort', choices=collectors.PROCESS_SORT_KEYS, default='cpu',

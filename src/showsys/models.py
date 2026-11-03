@@ -159,3 +159,16 @@ class ProcessInfo(Record):
     memory_percent: Optional[float]
     memory_rss: Optional[int]
     """Resident memory in bytes. ``None`` when the OS denies access to this process."""
+
+
+@dataclass
+class GpuInfo(Record):
+    index: int
+    name: str
+    driver_version: Optional[str]
+    memory_total: Optional[int]
+    memory_used: Optional[int]
+    memory_free: Optional[int]
+    utilization_percent: Optional[float]
+    temperature_c: Optional[float]
+    power_watts: Optional[float]

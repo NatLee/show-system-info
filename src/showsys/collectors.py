@@ -25,6 +25,7 @@ from .models import (
     DiskInfo,
     DiskPartition,
     Fan,
+    GpuInfo,
     MemoryInfo,
     NetworkAddress,
     NetworkInfo,
@@ -290,6 +291,71 @@ def get_sensors() -> SensorsInfo:
     )
 
 
+def _import_nvml() -> Any:
+    try:
+        import pynvml  # From the optional nvidia-ml-py package: pip install "showsys[gpu]"
+    except ImportError:
+        return None
+    return pynvml
+
+
+def nvml_installed() -> bool:
+    """Whether the optional NVIDIA library (``showsys[gpu]``) is installed."""
+    return _import_nvml() is not None
+
+
+def _text(value: Any) -> str:
+    # Old nvidia-ml-py versions return bytes.
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
+def get_gpus() -> Optional[List[GpuInfo]]:
+    """NVIDIA GPUs, through the optional ``showsys[gpu]`` extra.
+
+    ``None`` when the extra is not installed or no NVIDIA driver is loaded;
+    a value a GPU does not support (e.g. power on some laptops) is ``None``.
+    """
+    nvml = _import_nvml()
+    if nvml is None:
+        return None
+    try:
+        nvml.nvmlInit()
+    except nvml.NVMLError:
+        return None
+
+    def ask(query: Callable[..., Any], *args: Any) -> Any:
+        try:
+            return query(*args)
+        except nvml.NVMLError:
+            return None
+
+    try:
+        driver = ask(nvml.nvmlSystemGetDriverVersion)
+        gpus = []
+        for index in range(nvml.nvmlDeviceGetCount()):
+            handle = nvml.nvmlDeviceGetHandleByIndex(index)
+            memory = ask(nvml.nvmlDeviceGetMemoryInfo, handle)
+            usage = ask(nvml.nvmlDeviceGetUtilizationRates, handle)
+            temperature = ask(nvml.nvmlDeviceGetTemperature, handle, nvml.NVML_TEMPERATURE_GPU)
+            milliwatts = ask(nvml.nvmlDeviceGetPowerUsage, handle)
+            gpus.append(GpuInfo(
+                index=index,
+                name=_text(nvml.nvmlDeviceGetName(handle)),
+                driver_version=None if driver is None else _text(driver),
+                memory_total=memory.total if memory else None,
+                memory_used=memory.used if memory else None,
+                memory_free=memory.free if memory else None,
+                utilization_percent=float(usage.gpu) if usage else None,
+                temperature_c=None if temperature is None else float(temperature),
+                power_watts=None if milliwatts is None else milliwatts / 1000,
+            ))
+        return gpus
+    except nvml.NVMLError:
+        return None
+    finally:
+        ask(nvml.nvmlShutdown)
+
+
 #: Orders accepted by :func:`get_processes`.
 PROCESS_SORT_KEYS: Tuple[str, ...] = ('cpu', 'memory')
 
@@ -366,7 +432,7 @@ def get_processes(limit: int = 5, sort_by: str = 'cpu',
 
 #: Section names accepted by :func:`collect`, in the order they are returned.
 SECTIONS: Tuple[str, ...] = (
-    'system', 'boot', 'cpu', 'memory', 'swap', 'disk', 'network', 'sensors', 'processes')
+    'system', 'boot', 'cpu', 'memory', 'swap', 'disk', 'network', 'sensors', 'processes', 'gpu')
 
 
 def _check_sections(sections: Sequence[str]) -> List[str]:
@@ -402,6 +468,7 @@ def gather(sections: Sequence[str] = (), interval: float = DEFAULT_INTERVAL,
         'network': get_network,
         'sensors': get_sensors,
         'processes': processes,
+        'gpu': get_gpus,
     }
     return {name: getters[name]() for name in wanted}
 

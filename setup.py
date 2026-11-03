@@ -44,6 +44,8 @@ setuptools.setup(
     extras_require={
         'dev': ['check-manifest'],
         'test': ['pytest'],
+        # NVIDIA GPUs for --gpu; the official NVML bindings, imported as pynvml.
+        'gpu': ['nvidia-ml-py'],
     },
     entry_points={
         'console_scripts': [

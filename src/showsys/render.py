@@ -11,6 +11,7 @@ from .models import (
     BootInfo,
     CpuInfo,
     DiskInfo,
+    GpuInfo,
     MemoryInfo,
     NetworkInfo,
     ProcessInfo,
@@ -255,3 +256,30 @@ def processes_text(processes: Sequence[ProcessInfo], sort_by: str = 'cpu') -> st
     ] for p in processes]
     return f'Top {len(processes)} processes by {order}:\n' + table(
         ['PID', 'NAME', 'CPU%', 'MEM%', 'MEMORY', 'USER'], rows, right={0, 2, 3, 4})
+
+
+GPU_EXTRA_HINT = 'NVIDIA GPUs only; install the extra: pip install "showsys[gpu]"'
+
+
+def gpu_text(gpus: Optional[Sequence[GpuInfo]], nvml_installed: bool = True) -> str:
+    if gpus is None:
+        reason = 'no NVIDIA driver found' if nvml_installed else GPU_EXTRA_HINT
+        return f'GPU: {NA} ({reason})\n'
+    if not gpus:
+        return 'GPU: none found\n'
+    lines = []
+    for gpu in gpus:
+        if gpu.memory_total is None or gpu.memory_used is None:
+            memory = NA
+        else:
+            memory = (f'{size(gpu.memory_used)} used of {size(gpu.memory_total)} '
+                      f'({size_or_na(gpu.memory_free)} free)')
+        lines += [
+            f'GPU {gpu.index}: {gpu.name}',
+            f'\tDriver: {gpu.driver_version or NA}',
+            f'\tMemory: {memory}',
+            f"\tUtilization: {NA if gpu.utilization_percent is None else f'{gpu.utilization_percent:g}%'}",
+            f'\tTemperature: {NA if gpu.temperature_c is None else _celsius(gpu.temperature_c)}',
+            f"\tPower: {NA if gpu.power_watts is None else f'{gpu.power_watts:.2f}W'}",
+        ]
+    return '\n'.join(lines) + '\n'
