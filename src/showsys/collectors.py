@@ -146,7 +146,8 @@ def get_disks() -> DiskInfo:
     for partition in psutil.disk_partitions():
         try:
             usage = psutil.disk_usage(partition.mountpoint)
-        except PermissionError:
+        except OSError:
+            # No permission, no media in the drive, or a broken network or FUSE mount.
             continue
         partitions.append(DiskPartition(
             device=partition.device,

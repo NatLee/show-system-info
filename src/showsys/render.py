@@ -23,6 +23,7 @@ def size(num_bytes: float, suffix: str = 'B') -> str:
         if value < 1024:
             return f'{value:.2f}{unit}{suffix}'
         value /= 1024
+    return f'{value:.2f}E{suffix}'
 
 
 def size_or_na(num_bytes: Optional[float], suffix: str = 'B') -> str:
@@ -31,6 +32,10 @@ def size_or_na(num_bytes: Optional[float], suffix: str = 'B') -> str:
 
 def percent(value: float) -> str:
     return f'{value}%'
+
+
+def _count(value: Optional[int]) -> Any:
+    return NA if value is None else value
 
 
 def _mhz(value: Optional[float]) -> str:
@@ -66,8 +71,8 @@ def cpu_dict(info: CpuInfo) -> Dict[str, Any]:
         min_freq = _mhz(info.freq_min_mhz or 0.0)
         current_freq = _mhz(info.freq_current_mhz)
     return {
-        'Physical cores': info.physical_cores,
-        'Total cores': info.logical_cores,
+        'Physical cores': _count(info.physical_cores),
+        'Total cores': _count(info.logical_cores),
         'Max Frequency': max_freq,
         'Min Frequency': min_freq,
         'Current Frequency': current_freq,
@@ -141,9 +146,9 @@ def enum(info: Mapping[str, Any]) -> str:
         if isinstance(value, list):
             output += f'{key}:\n'
             if len(value) > 4:
-                # Four items per line.
+                # Four items per line. str(): the items can be dicts, e.g. disk partitions.
                 for i in range(0, len(value), 4):
-                    output += '\t'.join(value[i:i + 4]) + '\n'
+                    output += '\t'.join(str(item) for item in value[i:i + 4]) + '\n'
             else:
                 for item in value:
                     output += f'\t{item}\n'
