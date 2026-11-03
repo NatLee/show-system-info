@@ -432,7 +432,7 @@ def get_processes(limit: int = 5, sort_by: str = 'cpu',
 
 #: Section names accepted by :func:`collect`, in the order they are returned.
 SECTIONS: Tuple[str, ...] = (
-    'system', 'boot', 'cpu', 'memory', 'swap', 'disk', 'network', 'sensors', 'processes', 'gpu')
+    'system', 'boot', 'cpu', 'memory', 'swap', 'network', 'disk', 'sensors', 'processes', 'gpu')
 
 
 def _check_sections(sections: Sequence[str]) -> List[str]:

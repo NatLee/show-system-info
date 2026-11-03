@@ -48,6 +48,9 @@ VIEWS: Tuple[View, ...] = (
     View('swap', ('swap',), _print_method('swap_info')),
     View('cpu', ('cpu',), _print_method('cpu_info')),
     View('network', ('network',), _print_method('network_info')),
+    View('all', collectors.SECTIONS, lambda sysinfo, args: print(render.all_text(
+        collectors.gather(collectors.SECTIONS, top=_top(args), sort_by=_sort(args)),
+        _sort(args), collectors.nvml_installed()))),
     View('disk', ('disk',), _print_record(render.disk_text, collectors.get_disks)),
     View('sensors', ('sensors',), _print_record(render.sensors_text, collectors.get_sensors)),
     View('top', ('processes',), lambda sysinfo, args: print(render.processes_text(
@@ -123,6 +126,8 @@ def build_parser() -> argparse.ArgumentParser:
     sections.add_argument('-s', '--swap', action='store_true', help='Show swap information.')
     sections.add_argument('-c', '--cpu', action='store_true', help='Show CPU information.')
     sections.add_argument('-n', '--network', action='store_true', help='Show network information.')
+    sections.add_argument('-a', '--all', action='store_true',
+                          help='Show everything: --details plus disks, sensors, top processes and GPUs.')
     sections.add_argument('--disk', action='store_true',
                           help='Show disk partitions, their usage, and bytes read and written since boot.')
     sections.add_argument('--sensors', action='store_true',
@@ -135,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     output = parser.add_argument_group('output')
     output.add_argument('--sort', choices=collectors.PROCESS_SORT_KEYS, default='cpu',
-                        help='Order --top by CPU or memory use (default: cpu).')
+                        help='Order --top and --all processes by CPU or memory use (default: cpu).')
     output.add_argument('-j', '--json', action='store_true',
                         help='Print JSON instead of text: plain numbers (bytes, MHz, percent) and null '
                              'for values this OS does not report.')

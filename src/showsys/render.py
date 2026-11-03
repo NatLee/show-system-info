@@ -283,3 +283,20 @@ def gpu_text(gpus: Optional[Sequence[GpuInfo]], nvml_installed: bool = True) -> 
             f"\tPower: {NA if gpu.power_watts is None else f'{gpu.power_watts:.2f}W'}",
         ]
     return '\n'.join(lines) + '\n'
+
+
+def all_text(records: Mapping[str, Any], sort_by: str = 'cpu', nvml_installed: bool = True) -> str:
+    """Every section between borders: the ``detail_info()`` text, then disks, sensors,
+    processes and GPUs. ``records`` is what ``collectors.gather()`` returns for all sections."""
+    return (BORDER + '\n'
+            + enum(system_dict(records['system']))
+            + enum(boot_dict(records['boot']))
+            + enum(cpu_dict(records['cpu']))
+            + enum(memory_dict(records['memory']))
+            + enum(swap_dict(records['swap']))
+            + enum(network_dict(records['network']))
+            + disk_text(records['disk'])
+            + sensors_text(records['sensors'])
+            + processes_text(records['processes'], sort_by)
+            + gpu_text(records['gpu'], nvml_installed)
+            + BORDER)

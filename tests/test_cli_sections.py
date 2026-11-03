@@ -1,5 +1,6 @@
 """Sections added after ShowSys 1.0: --disk, --sensors, --top, --gpu and --all."""
 import json
+import sys
 
 import psutil
 import pytest
@@ -8,6 +9,7 @@ import showsys
 from showsys.cli import main
 
 from .fakes import GB, MB, Battery, DiskPartition, DiskUsage, FakeProcess
+from .test_output_format import BORDER, DETAIL_TEXT
 
 
 def _text(capsys, *flags):
@@ -187,3 +189,54 @@ def test_top_works_on_this_machine(capsys):
     rows = _json(capsys, '--top', '3', '--sort', 'memory')['processes']
     assert 1 <= len(rows) <= 3
     assert all(isinstance(p['pid'], int) for p in rows)
+
+
+# --all
+
+def test_all_prints_the_details_then_every_new_section(fake_machine, capsys, monkeypatch):
+    monkeypatch.setitem(sys.modules, 'pynvml', None)  # no GPU extra
+    details = DETAIL_TEXT[:-len(BORDER)]
+
+    text = _text(capsys, '--all')
+
+    assert text == (
+        details
+        + 'Partitions:\n'
+        + 'DEVICE     MOUNTPOINT  TYPE     TOTAL     USED     FREE   USE%\n'
+        + '/dev/sda1  /           ext4  100.00GB  40.00GB  60.00GB  40.0%\n'
+        + 'Total read: 1.00GB\nTotal write: 2.00GB\n'
+        + 'Temperatures:\n'
+        + '\tcoretemp Package id 0: 45.0C (high 80.0C, critical 100.0C)\n'
+        + '\tcoretemp Core 0: 43.5C (high 80.0C, critical 100.0C)\n'
+        + '\tacpitz: 27.8C\n'
+        + 'Fans:\n\tthinkpad: 2400 RPM\n'
+        + 'Battery: 87.0%, on battery, 1:23:45 left\n'
+        + 'Top 3 processes by CPU:\n'
+        + 'PID  NAME       CPU%  MEM%    MEMORY  USER\n'
+        + '101  python    12.3%  1.8%  300.00MB  nat\n'
+        + '202  postgres   3.0%  6.2%    1.00GB  postgres\n'
+        + '303  bash       0.0%  0.0%    4.00MB  nat\n'
+        + 'GPU: N/A (NVIDIA GPUs only; install the extra: pip install "showsys[gpu]")\n'
+        + BORDER + '\n')
+    assert _text(capsys, '-a') == text
+
+
+def test_all_json_has_every_section(fake_machine, capsys):
+    data = _json(capsys, '--all', '--top', '2', '--sort', 'memory')
+    assert list(data) == ['timestamp'] + list(showsys.SECTIONS)
+    assert [p['name'] for p in data['processes']] == ['postgres', 'python']
+
+
+def test_all_waits_once_for_cpu_and_processes(fake_machine, capsys):
+    _text(capsys, '--all')
+    # The fake CPU reading does not sleep, so the process sampler waits the whole second;
+    # with real psutil the CPU reading takes that second and the sampler waits ~0 more.
+    assert len(fake_machine.slept) == 1
+
+
+def test_all_works_on_this_machine(capsys):
+    text = _text(capsys, '--all')
+    for heading in ('System:', 'Boot Time:', 'Total CPU Usage:', 'Memory Total:', 'Swap Total:',
+                    'Total Bytes Sent:', 'Total read:', 'Battery:', 'GPU'):
+        assert heading in text
+    assert list(_json(capsys, '-a')) == ['timestamp'] + list(showsys.SECTIONS)
