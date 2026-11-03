@@ -56,12 +56,43 @@ def get_system() -> SystemInfo:
         version=uname.version,
         machine=uname.machine,
         processor=uname.processor or None,
-        # py-cpuinfo leaves out fields it cannot detect.
-        processor_brand=cpuinfo.get_cpu_info().get('brand_raw') or None,
+        processor_brand=_processor_brand(),
         ip_address=_ip_address(),
         mac_address=':'.join(re.findall('..', '%012x' % uuid.getnode())),
         python_version=platform.python_version(),
     )
+
+
+# py-cpuinfo's data sources before its CPUID probe, in the order get_cpu_info() tries them.
+# get_cpu_info() runs all of them in a new Python process, and the CPUID probe in yet another
+# one: about a second on every OS. The CPU name nearly always comes from one of these first
+# (the registry on Windows, /proc/cpuinfo or lscpu on Linux, sysctl on macOS and BSD).
+_QUICK_BRAND_SOURCES = (
+    'wmic', 'registry', 'proc_cpuinfo', 'cpufreq_info', 'lscpu', 'sysctl', 'kstat', 'dmesg',
+    'cat_var_run_dmesg_boot', 'ibm_pa_features', 'sysinfo',
+)
+
+
+def _quick_processor_brand() -> Optional[str]:
+    """The name py-cpuinfo would report, without its slow probe; None when unsure."""
+    module = getattr(cpuinfo, 'cpuinfo', None)
+    for source in _QUICK_BRAND_SOURCES:
+        read = getattr(module, f'_get_cpu_info_from_{source}', None)
+        if read is None:
+            return None  # A py-cpuinfo version that works differently: use its public API.
+        try:
+            brand = read().get('brand_raw')
+        except Exception:  # noqa: BLE001
+            return None
+        if brand:
+            # get_cpu_info() keeps the first source's value, so this is the same answer.
+            return str(brand)
+    return None
+
+
+def _processor_brand() -> Optional[str]:
+    # py-cpuinfo leaves out fields it cannot detect.
+    return _quick_processor_brand() or cpuinfo.get_cpu_info().get('brand_raw') or None
 
 
 def _ip_address() -> Optional[str]:

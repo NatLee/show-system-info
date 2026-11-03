@@ -8,6 +8,8 @@ import cpuinfo
 import psutil
 import pytest
 
+from showsys import collectors
+
 from .fakes import FakeMachine
 
 
@@ -17,6 +19,7 @@ def fake_machine(monkeypatch):
     machine = FakeMachine()
     monkeypatch.setattr(platform, 'uname', lambda: machine.uname)
     monkeypatch.setattr(cpuinfo, 'get_cpu_info', lambda: machine.cpu_info)
+    monkeypatch.setattr(collectors, '_quick_processor_brand', lambda: None)
     monkeypatch.setattr(socket, 'gethostname', lambda: 'demo-host')
     monkeypatch.setattr(socket, 'gethostbyname', lambda name: machine.ip_address)
     monkeypatch.setattr(uuid, 'getnode', lambda: machine.mac_node)

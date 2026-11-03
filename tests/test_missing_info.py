@@ -7,7 +7,7 @@ import cpuinfo
 import psutil
 import pytest
 
-from showsys import ShowSys
+from showsys import ShowSys, collectors
 from showsys.cli import main
 
 from .fakes import DiskPartition
@@ -38,6 +38,8 @@ def test_ip_address_is_na_when_the_host_name_cannot_be_resolved(monkeypatch, cap
 
 def test_processor_brand_is_na_when_py_cpuinfo_cannot_detect_it(monkeypatch):
     monkeypatch.setattr(cpuinfo, 'get_cpu_info', lambda: {'arch': 'ARM_8'})
+    # py-cpuinfo's quick sources find nothing either.
+    monkeypatch.setattr(collectors, '_quick_processor_brand', lambda: None)
 
     assert ShowSys().system_information()['Processor Brand'] == 'N/A'
 
