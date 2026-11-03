@@ -39,12 +39,67 @@ jobs:
       - name: Run tests
         # Runs tox with the Python version on PATH and lists the slowest tests
         run: tox -e py -- --durations=10
+      - name: Time the system calls behind the summary
+        # macOS runners have spent ~35 s in the summary; this shows which call takes the time.
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import platform, socket, time, uuid
+          calls = {
+              'socket.gethostname()': socket.gethostname,
+              'socket.gethostbyname(hostname)': lambda: socket.gethostbyname(socket.gethostname()),
+              'uuid.getnode()': uuid.getnode,
+              'platform.uname()': platform.uname,
+          }
+          for name, call in calls.items():
+              start = time.time()
+              try:
+                  result = call()
+              except OSError as error:
+                  result = error
+              print(f'{name}: {time.time() - start:.2f}s -> {result}')
+          EOF
       - name: Run showsys on this machine
         # Shows the real output and how long it takes on each OS
         shell: bash
         run: |
           pip install .
           time showsys -d
+          time showsys --all
+          showsys --sensors
+          showsys --watch 0.5 --count 3
+          showsys --all --json > all.json
+          python -c "import json; data = json.load(open('all.json')); print(sorted(data))"
+
+  gpu-extra:
+    # The optional NVIDIA extra on a machine without an NVIDIA driver: must say N/A, not crash.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install with the gpu extra
+        run: pip install ".[gpu,test]"
+      - name: Run tests with nvidia-ml-py installed
+        run: pytest
+      - name: Run showsys --gpu
+        run: |
+          showsys --gpu
+          showsys --gpu --json
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check the type hints
+        # Settings are in setup.cfg ([mypy], strict).
+        run: |
+          pip install . mypy==2.4.1 types-psutil==7.2.2.20260906
+          mypy src/showsys
 
   package:
     # Build the sdist and wheel the same way the release workflow does, and validate the metadata.
