@@ -153,3 +153,18 @@ def test_watch_works_on_this_machine(capsys):
     assert len(lines) == 3 and all(TIME.match(line) for line in lines[1:])
     main(['--watch', '0.2', '--count', '1', '--json'])
     assert 'cpu_percent' in json.loads(capsys.readouterr().out)
+
+
+def test_watch_columns_hold_the_widest_values():
+    widest = render.size(1024 ** 2 - 1)
+    assert widest == '1024.00KB'
+    rates = showsys.models.Rates(
+        timestamp='2026-11-04T23:59:59+08:00', interval_seconds=1.0, cpu_percent=100.0,
+        memory_percent=100.0, swap_percent=100.0, net_sent_per_sec=1024 ** 2 - 1,
+        net_recv_per_sec=1024 ** 2 - 1, disk_read_per_sec=1024 ** 2 - 1, disk_write_per_sec=1024 ** 2 - 1)
+    line, header = render.watch_line(rates), render.watch_header()
+    assert line.startswith('23:59:59')
+    assert len(line) == len(header)
+    # Every value ends exactly where its header ends.
+    assert [m.end() for m in re.finditer(r'\S+', line)][1:] == \
+        [m.end() for m in re.finditer(r'\S+(?: \S+)?', header)][1:]
