@@ -11,6 +11,7 @@ import os
 import platform
 import re
 import socket
+import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
@@ -68,36 +69,68 @@ def get_system() -> SystemInfo:
     )
 
 
-# py-cpuinfo's data sources before its CPUID probe, in the order get_cpu_info() tries them.
-# get_cpu_info() runs all of them in a new Python process, and the CPUID probe in yet another
-# one: about a second on every OS. The CPU name nearly always comes from one of these first
-# (the registry on Windows, /proc/cpuinfo or lscpu on Linux, sysctl on macOS and BSD).
-_QUICK_BRAND_SOURCES = (
-    'wmic', 'registry', 'proc_cpuinfo', 'cpufreq_info', 'lscpu', 'sysctl', 'kstat', 'dmesg',
-    'cat_var_run_dmesg_boot', 'ibm_pa_features', 'sysinfo',
-)
+# Public places where an OS names the CPU. These are the same places py-cpuinfo reads first,
+# but py-cpuinfo's get_cpu_info() also starts two Python processes (about one second).
+_PROC_CPUINFO = '/proc/cpuinfo'                                        # Linux
+_REGISTRY_CPU_KEY = r'HARDWARE\DESCRIPTION\System\CentralProcessor\0'  # Windows
+_SYSCTL_CPU_NAME = ('sysctl', '-n', 'machdep.cpu.brand_string')        # macOS
+_COMMAND_TIMEOUT = 5.0  # seconds; sysctl answers at once, this only guards against a hang
 
 
-def _quick_processor_brand() -> Optional[str]:
-    """The name py-cpuinfo would report, without its slow probe; None when unsure."""
-    module = getattr(cpuinfo, 'cpuinfo', None)
-    for source in _QUICK_BRAND_SOURCES:
-        read = getattr(module, f'_get_cpu_info_from_{source}', None)
-        if read is None:
-            return None  # A py-cpuinfo version that works differently: use its public API.
-        try:
-            brand = read().get('brand_raw')
-        except Exception:  # noqa: BLE001
-            return None
-        if brand:
-            # get_cpu_info() keeps the first source's value, so this is the same answer.
-            return str(brand)
+def _cpu_name_from_proc_cpuinfo() -> Optional[str]:
+    """The first ``model name`` in /proc/cpuinfo; None without the file or the field."""
+    try:
+        with open(_PROC_CPUINFO, encoding='utf-8', errors='replace') as cpuinfo_file:
+            for line in cpuinfo_file:
+                key, separator, value = line.partition(':')
+                if separator and key.strip() == 'model name':
+                    return value.strip() or None
+    except OSError:
+        return None
     return None
 
 
+def _cpu_name_from_registry() -> Optional[str]:
+    """``ProcessorNameString`` of the first CPU in the Windows registry; None elsewhere."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    registry: Any = winreg  # The type stubs only define winreg's contents on Windows.
+    try:
+        with registry.OpenKey(registry.HKEY_LOCAL_MACHINE, _REGISTRY_CPU_KEY) as key:
+            value = registry.QueryValueEx(key, 'ProcessorNameString')[0]
+    except OSError:
+        return None
+    return str(value).strip() or None
+
+
+def _cpu_name_from_sysctl() -> Optional[str]:
+    """``sysctl -n machdep.cpu.brand_string`` (macOS); None where sysctl lacks that name."""
+    try:
+        result = subprocess.run(_SYSCTL_CPU_NAME, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                universal_newlines=True, timeout=_COMMAND_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (result.stdout.strip() or None) if result.returncode == 0 else None
+
+
+#: Tried in order; each source returns None on systems where it does not apply.
+_CPU_NAME_SOURCES: Tuple[Callable[[], Optional[str]], ...] = (
+    _cpu_name_from_proc_cpuinfo,
+    _cpu_name_from_registry,
+    _cpu_name_from_sysctl,
+)
+
+
 def _processor_brand() -> Optional[str]:
-    # py-cpuinfo leaves out fields it cannot detect.
-    return _quick_processor_brand() or cpuinfo.get_cpu_info().get('brand_raw') or None
+    for source in _CPU_NAME_SOURCES:
+        name = source()
+        if name:
+            return name
+    # None of the quick sources knows (e.g. ARM boards without "model name"): ask py-cpuinfo,
+    # which also probes the CPU itself. It leaves out fields it cannot detect.
+    return cpuinfo.get_cpu_info().get('brand_raw') or None
 
 
 # Where to "send" a UDP packet when asking the routing table which source address outbound

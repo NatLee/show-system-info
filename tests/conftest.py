@@ -23,7 +23,8 @@ def fake_machine(monkeypatch):
     machine = FakeMachine()
     monkeypatch.setattr(platform, 'uname', lambda: machine.uname)
     monkeypatch.setattr(cpuinfo, 'get_cpu_info', lambda: machine.cpu_info)
-    monkeypatch.setattr(collectors, '_quick_processor_brand', lambda: None)
+    # Only the fake py-cpuinfo names the CPU; the OS sources would read the real machine.
+    monkeypatch.setattr(collectors, '_CPU_NAME_SOURCES', ())
     monkeypatch.setattr(socket, 'socket', lambda *args, **kwargs: FakeSocket(machine, *args, **kwargs))
     monkeypatch.setattr(socket, 'gethostbyname', _no_dns)
     monkeypatch.setattr(uuid, 'getnode', lambda: machine.mac_node)

@@ -41,8 +41,8 @@ def test_ip_address_does_not_depend_on_resolving_the_host_name(monkeypatch, caps
 
 def test_processor_brand_is_na_when_py_cpuinfo_cannot_detect_it(monkeypatch):
     monkeypatch.setattr(cpuinfo, 'get_cpu_info', lambda: {'arch': 'ARM_8'})
-    # py-cpuinfo's quick sources find nothing either.
-    monkeypatch.setattr(collectors, '_quick_processor_brand', lambda: None)
+    # The OS sources find nothing either.
+    monkeypatch.setattr(collectors, '_CPU_NAME_SOURCES', ())
 
     assert ShowSys().system_information()['Processor Brand'] == 'N/A'
 
