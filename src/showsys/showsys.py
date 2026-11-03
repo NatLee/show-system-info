@@ -96,13 +96,15 @@ class ShowSys:
         for interface_name, interface_addresses in if_addrs.items():
             addresses = []
             for address in interface_addresses:
-                if str(address.family) == 'AddressFamily.AF_INET':
+                # Compare the values, not their text: str() of these enums changed in Python 3.11.
+                # psutil.AF_LINK is the MAC address family on every OS (AF_PACKET only exists on Linux).
+                if address.family == socket.AF_INET:
                     addresses.append({
                         "IP Address": address.address,
                         "Netmask": address.netmask,
                         "Broadcast IP": address.broadcast
                     })
-                elif str(address.family) == 'AddressFamily.AF_PACKET':
+                elif address.family == psutil.AF_LINK:
                     addresses.append({
                         "MAC Address": address.address,
                         "Netmask": address.netmask,
