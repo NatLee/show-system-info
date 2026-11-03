@@ -33,7 +33,7 @@ def test_get_system_returns_plain_values(fake_machine):
 def test_get_system_uses_none_for_missing_values(fake_machine, monkeypatch):
     fake_machine.uname = fake_machine.uname._replace(processor='')
     fake_machine.cpu_info = {}
-    monkeypatch.setattr('socket.gethostbyname', lambda name: (_ for _ in ()).throw(OSError('no')))
+    fake_machine.interfaces = {'lo': fake_machine.interfaces['lo']}  # no usable address
 
     info = showsys.get_system()
     assert info.processor is None

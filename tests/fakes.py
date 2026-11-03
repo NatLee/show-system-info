@@ -38,7 +38,8 @@ class FakeMachine:
     def __init__(self):
         self.uname = Uname('Linux', 'demo-host', '6.8.0', '#1 SMP PREEMPT_DYNAMIC', 'x86_64', 'x86_64')
         self.cpu_info = {'brand_raw': 'Example CPU 9000'}
-        self.ip_address = '192.168.1.10'
+        # Source address the routing table picks per address family; None means no route.
+        self.routes = {socket.AF_INET: '192.168.1.10', socket.AF_INET6: None}
         self.mac_node = 0xaabbccddeeff
         self.boot_time = BOOT_TIMESTAMP
         self.physical_cores = 4
@@ -75,6 +76,7 @@ class FakeMachine:
         self.fans = {'thinkpad': [Fan('', 2400)]}
         self.battery = Battery(percent=87.0, secsleft=5025, power_plugged=False)
         self.slept = []
+        self.sockets = []
         self.clock = 1000.0
         self.on_sleep = []
         self.processes = [
@@ -132,3 +134,36 @@ class FakeProcess:
         if self.memory_error:
             raise self.memory_error
         return self._memory_percent
+
+
+class FakeSocket:
+    """A UDP socket whose route lookup answers from FakeMachine.routes; records every call."""
+
+    def __init__(self, machine, family=socket.AF_INET, type=socket.SOCK_STREAM, *args, **kwargs):
+        self.machine = machine
+        self.family = family
+        self.source = None
+        machine.sockets.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def close(self):
+        pass
+
+    def connect(self, address):
+        self.destination = address
+        self.source = self.machine.routes.get(self.family)
+        if self.source is None:
+            raise OSError(101, 'Network is unreachable')
+
+    def getsockname(self):
+        return (self.source, 54321)
+
+    def send(self, *args, **kwargs):
+        raise AssertionError('showsys must not send anything')
+
+    sendto = sendall = send

@@ -14,8 +14,10 @@ from .collectors import collect
 from .showsys import ShowSys
 
 ISSUES_URL = 'https://github.com/NatLee/show-system-info/issues'
-DEFAULT_TOP = 5
 
+# Exit statuses, decided only in cli(). argparse exits with 2 on its own for usage errors.
+EXIT_OK = 0
+EXIT_FAILURE = 1
 
 # Prints a view as text. ShowSys.info() and detail_info() also return the text; it is ignored.
 ShowText = Callable[[ShowSys, argparse.Namespace], object]
@@ -28,10 +30,10 @@ class View(NamedTuple):
     show_text: ShowText
 
 
-def _print_method(method: str) -> ShowText:
+def _print_section(section: str) -> ShowText:
     """Text of the options from ShowSys 1.0: exactly what they have always printed."""
     def show(sysinfo: ShowSys, args: argparse.Namespace) -> None:
-        print(sysinfo.enum(getattr(sysinfo, method)()))
+        print(sysinfo.enum(sysinfo._section(section)))
     return show
 
 
@@ -41,17 +43,18 @@ def _print_record(text: Callable[[Any], str], get: Callable[[], Any]) -> ShowTex
     return show
 
 
-SUMMARY = View('', ('system', 'memory', 'swap'), lambda sysinfo, args: sysinfo.info())
+SUMMARY = View('', render.SUMMARY_SECTIONS, lambda sysinfo, args: sysinfo.info())
+
+# The 1.0 options that show one section each, as (option, section).
+_SINGLE_SECTION_OPTIONS = (
+    ('boot_time', 'boot'), ('memory', 'memory'), ('swap', 'swap'), ('cpu', 'cpu'),
+    ('network', 'network'),
+)
 
 # When several options are given, the first one in this order wins (as in ShowSys 1.0).
 VIEWS: Tuple[View, ...] = (
-    View('details', ('system', 'boot', 'cpu', 'memory', 'swap', 'network'),
-         lambda sysinfo, args: sysinfo.detail_info()),
-    View('boot_time', ('boot',), _print_method('boot_time')),
-    View('memory', ('memory',), _print_method('memory_info')),
-    View('swap', ('swap',), _print_method('swap_info')),
-    View('cpu', ('cpu',), _print_method('cpu_info')),
-    View('network', ('network',), _print_method('network_info')),
+    View('details', render.DETAIL_SECTIONS, lambda sysinfo, args: sysinfo.detail_info()),
+    *(View(option, (section,), _print_section(section)) for option, section in _SINGLE_SECTION_OPTIONS),
     View('all', collectors.SECTIONS, lambda sysinfo, args: print(render.all_text(
         collectors.gather(collectors.SECTIONS, top=_top(args), sort_by=_sort(args)),
         _sort(args), collectors.nvml_installed()))),
@@ -65,11 +68,11 @@ VIEWS: Tuple[View, ...] = (
 
 
 def _top(args: argparse.Namespace) -> int:
-    return getattr(args, 'top', None) or DEFAULT_TOP
+    return getattr(args, 'top', None) or collectors.DEFAULT_TOP
 
 
 def _sort(args: argparse.Namespace) -> str:
-    return getattr(args, 'sort', None) or 'cpu'
+    return getattr(args, 'sort', None) or collectors.DEFAULT_SORT
 
 
 def pick_view(args: argparse.Namespace) -> View:
@@ -89,18 +92,19 @@ def _report(error: Exception, out: TextIO) -> None:
     print(f'-> {ISSUES_URL}', file=out)
 
 
-def cli(args: argparse.Namespace) -> None:
+def cli(args: argparse.Namespace) -> int:
     """
     Command-line interface for the ShowSys package.
 
     :param args: Parsed command-line arguments.
+    :return: The exit status: ``EXIT_OK`` (0), or ``EXIT_FAILURE`` (1) after reporting an error.
     """
     # getattr: callers that build the Namespace themselves may not set the newer options.
     as_json = getattr(args, 'json', False)
     try:
         if getattr(args, 'watch', None):
             _watch(args.watch, getattr(args, 'count', None), as_json)
-            return
+            return EXIT_OK
         view = pick_view(args)
         if as_json:
             print(json.dumps(collect(*view.sections, top=_top(args), sort_by=_sort(args)), indent=2))
@@ -109,6 +113,8 @@ def cli(args: argparse.Namespace) -> None:
     except Exception as e:
         # Keep stdout clean for JSON readers: the report goes to stderr in that mode.
         _report(e, sys.stderr if as_json else sys.stdout)
+        return EXIT_FAILURE
+    return EXIT_OK
 
 
 def _watch(interval: float, count: Optional[int], as_json: bool) -> None:
@@ -170,33 +176,37 @@ def build_parser() -> argparse.ArgumentParser:
                           help='Show disk partitions, their usage, and bytes read and written since boot.')
     sections.add_argument('--sensors', action='store_true',
                           help='Show temperatures, fans and battery, where this OS reports them.')
-    sections.add_argument('--top', nargs='?', const=DEFAULT_TOP, type=_positive_int, metavar='N',
-                          help=f'Show the N busiest processes (default {DEFAULT_TOP}), '
-                               f'CPU measured over one second.')
+    sections.add_argument('--top', nargs='?', const=collectors.DEFAULT_TOP, type=_positive_int, metavar='N',
+                          help=f'Show the N busiest processes (default {collectors.DEFAULT_TOP}), '
+                               f'CPU measured over {collectors.DEFAULT_INTERVAL:g} s.')
     sections.add_argument('--gpu', action='store_true',
-                          help='Show NVIDIA GPUs (needs the extra: pip install "showsys[gpu]").')
+                          help=f'Show NVIDIA GPUs (needs the extra: pip install "{collectors.GPU_EXTRA}").')
 
     output = parser.add_argument_group('output')
-    output.add_argument('--sort', choices=collectors.PROCESS_SORT_KEYS, default='cpu',
-                        help='Order --top and --all processes by CPU or memory use (default: cpu).')
+    output.add_argument('--sort', choices=collectors.PROCESS_SORT_KEYS, default=collectors.DEFAULT_SORT,
+                        help=f'Order the processes of --top and --all (default: {collectors.DEFAULT_SORT}).')
     output.add_argument('-j', '--json', action='store_true',
                         help='Print JSON instead of text: plain numbers (bytes, MHz, percent) and null '
                              'for values this OS does not report.')
 
     live_mode = parser.add_argument_group('live mode')
-    live_mode.add_argument('-w', '--watch', nargs='?', const=1.0, type=_positive_float, metavar='SECONDS',
-                           help='Print CPU, memory and swap use and network and disk throughput every '
-                                'SECONDS (default 1) until Ctrl+C. With --json: one JSON object per line.')
+    live_mode.add_argument('-w', '--watch', nargs='?', const=live.DEFAULT_WATCH_INTERVAL, type=_positive_float,
+                           metavar='SECONDS',
+                           help=f'Print CPU, memory and swap use and network and disk throughput every '
+                                f'SECONDS (default {live.DEFAULT_WATCH_INTERVAL:g}) until Ctrl+C. '
+                                f'With --json: one JSON object per line.')
     live_mode.add_argument('--count', type=_positive_int, metavar='N',
                            help='Stop --watch after N readings.')
     return parser
 
 
-def main(argv: Optional[List[str]] = None) -> None:
+def main(argv: Optional[List[str]] = None) -> int:
     """
     Main entry point for the `showsys` command-line interface.
 
     :param argv: Command-line arguments without the program name. Defaults to ``sys.argv[1:]``.
+    :return: The exit status from :func:`cli`. The ``showsys`` script and ``python -m showsys``
+        pass it to ``sys.exit()``.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -204,4 +214,4 @@ def main(argv: Optional[List[str]] = None) -> None:
         parser.error('--count only works together with --watch')
     if args.watch is not None and any(getattr(args, view.option) for view in VIEWS):
         parser.error('--watch has its own columns; leave out the section options')
-    cli(args)
+    return cli(args)

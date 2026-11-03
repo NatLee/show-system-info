@@ -76,13 +76,13 @@ def test_gpu_lists_each_nvidia_gpu(monkeypatch, capsys):
 
 
 def test_gpu_json_has_numbers(monkeypatch, capsys):
-    _fake_nvml(monkeypatch, [RTX, {'name': b'Tesla T4'}])
+    _fake_nvml(monkeypatch, [RTX, {'name': 'Tesla T4'}])
     gpus = json.loads(_text(capsys, '--gpu', '--json'))['gpu']
     assert gpus[0] == {
         'index': 0, 'name': 'NVIDIA GeForce RTX 4080', 'driver_version': '550.54',
         'memory_total': 16 * GB, 'memory_used': 2 * GB, 'memory_free': 14 * GB,
         'utilization_percent': 37.0, 'temperature_c': 41.0, 'power_watts': 52.25}
-    # Old nvidia-ml-py returns bytes; values a GPU does not support are null.
+    # Values a GPU does not support are null.
     assert gpus[1] == {
         'index': 1, 'name': 'Tesla T4', 'driver_version': '550.54',
         'memory_total': None, 'memory_used': None, 'memory_free': None,

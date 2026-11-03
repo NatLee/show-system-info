@@ -1,27 +1,18 @@
 """Live readings for ``showsys --watch``: usage and throughput, every few seconds."""
 import time
-from typing import Iterator, Optional, Tuple
+from typing import Iterator, Optional
 
 import psutil
 
-from .collectors import local_time
+from .collectors import disk_io_totals, local_time, net_io_totals
 from .models import Rates
 
-_Totals = Tuple[Optional[int], Optional[int]]
+#: Seconds between readings unless told otherwise.
+DEFAULT_WATCH_INTERVAL = 1.0
 
 
 def _clock() -> float:
     return time.monotonic()
-
-
-def _net_totals() -> _Totals:
-    io = psutil.net_io_counters()
-    return (io.bytes_sent, io.bytes_recv) if io else (None, None)
-
-
-def _disk_totals() -> _Totals:
-    io = psutil.disk_io_counters()
-    return (io.read_bytes, io.write_bytes) if io else (None, None)
 
 
 def _rate(new: Optional[int], old: Optional[int], seconds: float) -> Optional[float]:
@@ -31,7 +22,7 @@ def _rate(new: Optional[int], old: Optional[int], seconds: float) -> Optional[fl
     return round(max(0, new - old) / seconds, 1)
 
 
-def watch(interval: float = 1.0, count: Optional[int] = None) -> Iterator[Rates]:
+def watch(interval: float = DEFAULT_WATCH_INTERVAL, count: Optional[int] = None) -> Iterator[Rates]:
     """Yield a reading every ``interval`` seconds, ``count`` times or until you stop iterating.
 
     Each reading covers the time since the previous one::
@@ -44,13 +35,13 @@ def watch(interval: float = 1.0, count: Optional[int] = None) -> Iterator[Rates]
     if count is not None and count < 1:
         raise ValueError('count must be at least 1')
     psutil.cpu_percent(interval=None)  # Start the first CPU measurement now.
-    net, disk, last = _net_totals(), _disk_totals(), _clock()
+    net, disk, last = net_io_totals(), disk_io_totals(), _clock()
     taken = 0
     while count is None or taken < count:
         # Sleep until the next tick, so slow readings do not make the pace drift.
         time.sleep(max(0.0, last + interval - _clock()))
         now = _clock()
-        new_net, new_disk = _net_totals(), _disk_totals()
+        new_net, new_disk = net_io_totals(), disk_io_totals()
         seconds = now - last
         yield Rates(
             timestamp=local_time(time.time()),

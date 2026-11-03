@@ -75,6 +75,16 @@ If you pass several sections, the first one in this table wins, as it always has
 
 `python -m showsys` works like the `showsys` command, which helps when the scripts folder is not on `PATH`.
 
+### Exit status
+
+| Status | Meaning |
+|---|---|
+| `0` | It worked, including when you stop `--watch` with Ctrl+C |
+| `1` | Something failed. The error report is printed (on stderr with `--json`) |
+| `2` | The options were wrong (for example `--top 0`) |
+
+Up to 1.1.0, `showsys` exited with `0` even when it failed.
+
 ### Live mode
 
 `--watch` prints one line per reading. Each line covers the time since the previous one, so the rates
@@ -124,7 +134,7 @@ $ showsys --memory --json
 - `timestamp` is the local time when the collection started.
 - The sections are `system`, `boot`, `cpu`, `memory`, `swap`, `network`, `disk`, `sensors`,
   `processes` and `gpu`. `showsys --all --json` has all of them.
-- If something goes wrong, the error goes to stderr, so stdout never holds half a document.
+- If something goes wrong, the error goes to stderr, so stdout never holds half a document, and the exit status is `1`.
 
 For example, the memory use in a shell script:
 
@@ -227,9 +237,22 @@ Not every OS reports everything. ShowSys shows `N/A` (`null` in JSON) for what's
 
 A few more cases:
 
-- The IP address shows `N/A` when the computer's host name can't be resolved (common on macOS).
+- The IP address shows `N/A` only when no network interface has a usable address (see below).
 - Disk read and write totals are missing in some containers.
 - `--top` leaves out processes the OS won't let you inspect, or shows `N/A` for their memory.
+
+### Which IP address?
+
+`IP-Address` (`ip_address` in JSON) is read from the network interfaces. There is no DNS lookup,
+so it no longer depends on whether the host name resolves. The rule:
+
+1. Candidates are the addresses of interfaces that are up, leaving out loopback (`127.0.0.1`, `::1`)
+   and link-local (`169.254.x.x`, `fe80::`) addresses.
+2. The candidate that the routing table uses for outbound traffic (the default route) wins. ShowSys
+   asks the OS which source address a UDP socket would use; nothing is sent.
+3. Without a default route, it takes the first candidate in the order the OS lists the interfaces.
+
+IPv4 comes first; an IPv6 address is shown only when there is no usable IPv4 address.
 
 ## Development
 

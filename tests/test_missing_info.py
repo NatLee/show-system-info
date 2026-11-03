@@ -28,18 +28,21 @@ def _run_cli(monkeypatch, capsys, *flags):
     return out
 
 
-def test_ip_address_is_na_when_the_host_name_cannot_be_resolved(monkeypatch, capsys):
+def test_ip_address_does_not_depend_on_resolving_the_host_name(monkeypatch, capsys):
+    # Until 1.1 the address came from a DNS lookup of the host name: N/A when that failed,
+    # and 35 s on macOS runners. It now comes from the interfaces on this machine.
     monkeypatch.setattr(socket, 'gethostbyname', _unresolvable)
+    expected = collectors.primary_address(collectors.get_network().interfaces) or 'N/A'
 
-    assert ShowSys().system_information()['IP-Address'] == 'N/A'
-    assert 'IP-Address: N/A' in ShowSys().info(show=False)
-    assert 'IP-Address: N/A' in _run_cli(monkeypatch, capsys)
+    assert ShowSys().system_information()['IP-Address'] == expected
+    assert f'IP-Address: {expected}' in ShowSys().info(show=False)
+    assert f'IP-Address: {expected}' in _run_cli(monkeypatch, capsys)
 
 
 def test_processor_brand_is_na_when_py_cpuinfo_cannot_detect_it(monkeypatch):
     monkeypatch.setattr(cpuinfo, 'get_cpu_info', lambda: {'arch': 'ARM_8'})
-    # py-cpuinfo's quick sources find nothing either.
-    monkeypatch.setattr(collectors, '_quick_processor_brand', lambda: None)
+    # The OS sources find nothing either.
+    monkeypatch.setattr(collectors, '_CPU_NAME_SOURCES', ())
 
     assert ShowSys().system_information()['Processor Brand'] == 'N/A'
 

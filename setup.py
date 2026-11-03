@@ -48,7 +48,8 @@ setuptools.setup(
         'dev': ['check-manifest'],
         'test': ['pytest'],
         # NVIDIA GPUs for --gpu; the official NVML bindings, imported as pynvml.
-        'gpu': ['nvidia-ml-py'],
+        # 11.515.48 is the first release that returns names as str instead of bytes.
+        'gpu': ['nvidia-ml-py>=11.515.48'],
     },
     entry_points={
         'console_scripts': [

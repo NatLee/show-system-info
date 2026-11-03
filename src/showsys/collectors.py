@@ -6,14 +6,16 @@ Every value the operating system does not report becomes ``None``.
 System calls go through the module objects (``psutil.cpu_freq()``, not an imported name),
 so tests can replace them with ``monkeypatch.setattr(psutil, ...)``.
 """
+import ipaddress
 import os
 import platform
 import re
 import socket
+import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 import cpuinfo
 import psutil
@@ -41,6 +43,29 @@ from .models import (
 #: Seconds `get_cpu()` waits to measure CPU usage, same as ShowSys 1.0.
 DEFAULT_INTERVAL = 1.0
 
+#: How many processes `get_processes()` and `showsys --top` list unless told otherwise.
+DEFAULT_TOP = 5
+
+#: The optional extra that installs NVIDIA's NVML bindings, as named in setup.py.
+GPU_EXTRA = 'showsys[gpu]'
+
+
+# What "this system cannot tell" looks like: a facility the OS lacks (NotImplementedError),
+# a failed or refused system call (OSError), or psutil's own errors such as AccessDenied.
+# Anything else is a bug and must reach the error report instead of turning into N/A.
+_UNAVAILABLE = (OSError, NotImplementedError, psutil.Error)
+
+
+def _optional(module: Any, name: str) -> Any:
+    """``module.<name>()``, or None when this platform lacks the function or cannot answer."""
+    read = getattr(module, name, None)
+    if read is None:
+        return None
+    try:
+        return read()
+    except _UNAVAILABLE:
+        return None
+
 
 def local_time(timestamp: float) -> str:
     """ISO 8601 local time with its UTC offset, to the second."""
@@ -48,7 +73,10 @@ def local_time(timestamp: float) -> str:
 
 
 def get_system() -> SystemInfo:
-    """Operating system, host name, CPU model and the addresses of this machine."""
+    """Operating system, host name, CPU model and the addresses of this machine.
+
+    ``ip_address`` follows the rule in :func:`primary_address`.
+    """
     uname = platform.uname()
     return SystemInfo(
         system=uname.system,
@@ -58,50 +86,136 @@ def get_system() -> SystemInfo:
         machine=uname.machine,
         processor=uname.processor or None,
         processor_brand=_processor_brand(),
-        ip_address=_ip_address(),
+        ip_address=primary_address(get_network().interfaces),
         mac_address=':'.join(re.findall('..', '%012x' % uuid.getnode())),
         python_version=platform.python_version(),
     )
 
 
-# py-cpuinfo's data sources before its CPUID probe, in the order get_cpu_info() tries them.
-# get_cpu_info() runs all of them in a new Python process, and the CPUID probe in yet another
-# one: about a second on every OS. The CPU name nearly always comes from one of these first
-# (the registry on Windows, /proc/cpuinfo or lscpu on Linux, sysctl on macOS and BSD).
-_QUICK_BRAND_SOURCES = (
-    'wmic', 'registry', 'proc_cpuinfo', 'cpufreq_info', 'lscpu', 'sysctl', 'kstat', 'dmesg',
-    'cat_var_run_dmesg_boot', 'ibm_pa_features', 'sysinfo',
-)
+# Public places where an OS names the CPU. These are the same places py-cpuinfo reads first,
+# but py-cpuinfo's get_cpu_info() also starts two Python processes (about one second).
+_PROC_CPUINFO = '/proc/cpuinfo'                                        # Linux
+_REGISTRY_CPU_KEY = r'HARDWARE\DESCRIPTION\System\CentralProcessor\0'  # Windows
+_SYSCTL_CPU_NAME = ('sysctl', '-n', 'machdep.cpu.brand_string')        # macOS
+_COMMAND_TIMEOUT = 5.0  # seconds; sysctl answers at once, this only guards against a hang
 
 
-def _quick_processor_brand() -> Optional[str]:
-    """The name py-cpuinfo would report, without its slow probe; None when unsure."""
-    module = getattr(cpuinfo, 'cpuinfo', None)
-    for source in _QUICK_BRAND_SOURCES:
-        read = getattr(module, f'_get_cpu_info_from_{source}', None)
-        if read is None:
-            return None  # A py-cpuinfo version that works differently: use its public API.
-        try:
-            brand = read().get('brand_raw')
-        except Exception:  # noqa: BLE001
-            return None
-        if brand:
-            # get_cpu_info() keeps the first source's value, so this is the same answer.
-            return str(brand)
+def _cpu_name_from_proc_cpuinfo() -> Optional[str]:
+    """The first ``model name`` in /proc/cpuinfo; None without the file or the field."""
+    try:
+        with open(_PROC_CPUINFO, encoding='utf-8', errors='replace') as cpuinfo_file:
+            for line in cpuinfo_file:
+                key, separator, value = line.partition(':')
+                if separator and key.strip() == 'model name':
+                    return value.strip() or None
+    except OSError:
+        return None
     return None
 
 
-def _processor_brand() -> Optional[str]:
-    # py-cpuinfo leaves out fields it cannot detect.
-    return _quick_processor_brand() or cpuinfo.get_cpu_info().get('brand_raw') or None
-
-
-def _ip_address() -> Optional[str]:
+def _cpu_name_from_registry() -> Optional[str]:
+    """``ProcessorNameString`` of the first CPU in the Windows registry; None elsewhere."""
     try:
-        return socket.gethostbyname(socket.gethostname())
-    except OSError:
-        # The host name is not in DNS or the hosts file (common on macOS and in containers).
+        import winreg
+    except ImportError:
         return None
+    registry: Any = winreg  # The type stubs only define winreg's contents on Windows.
+    try:
+        with registry.OpenKey(registry.HKEY_LOCAL_MACHINE, _REGISTRY_CPU_KEY) as key:
+            value = registry.QueryValueEx(key, 'ProcessorNameString')[0]
+    except OSError:
+        return None
+    return str(value).strip() or None
+
+
+def _cpu_name_from_sysctl() -> Optional[str]:
+    """``sysctl -n machdep.cpu.brand_string`` (macOS); None where sysctl lacks that name."""
+    try:
+        result = subprocess.run(_SYSCTL_CPU_NAME, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                universal_newlines=True, timeout=_COMMAND_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (result.stdout.strip() or None) if result.returncode == 0 else None
+
+
+#: Tried in order; each source returns None on systems where it does not apply.
+_CPU_NAME_SOURCES: Tuple[Callable[[], Optional[str]], ...] = (
+    _cpu_name_from_proc_cpuinfo,
+    _cpu_name_from_registry,
+    _cpu_name_from_sysctl,
+)
+
+
+def _processor_brand() -> Optional[str]:
+    for source in _CPU_NAME_SOURCES:
+        name = source()
+        if name:
+            return name
+    # None of the quick sources knows (e.g. ARM boards without "model name"): ask py-cpuinfo,
+    # which also probes the CPU itself. It leaves out fields it cannot detect.
+    return cpuinfo.get_cpu_info().get('brand_raw') or None
+
+
+# Where to "send" a UDP packet when asking the routing table which source address outbound
+# traffic uses, per address family, in order of preference. These are documentation addresses
+# (RFC 5737, RFC 3849) that never belong to a real host, and connect() on a UDP socket only looks
+# up the route: no packet leaves the machine. Any port works; 9 is the "discard" service.
+_ROUTE_PROBES: Dict[str, Tuple[int, Tuple[str, int]]] = {
+    'ipv4': (socket.AF_INET, ('192.0.2.1', 9)),
+    'ipv6': (socket.AF_INET6, ('2001:db8::1', 9)),
+}
+
+
+def _outbound_address(family: int, destination: Tuple[str, int]) -> Optional[str]:
+    """The source address the routing table picks for ``destination``, or None without a route."""
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.connect(destination)
+            return str(probe.getsockname()[0])
+    except OSError:
+        return None
+
+
+def _ip(address: str) -> Any:
+    # psutil adds the scope to IPv6 link-local addresses ("fe80::1%eth0"); ipaddress on
+    # Python < 3.9 does not accept it, and the scope is not part of the address itself.
+    return ipaddress.ip_address(address.split('%', 1)[0])
+
+
+def _reachable(address: str) -> bool:
+    """Whether another machine could reach this address: not loopback, link-local or unspecified."""
+    ip = _ip(address)
+    return not (ip.is_loopback or ip.is_link_local or ip.is_unspecified)
+
+
+def primary_address(interfaces: Mapping[str, NetworkInterface]) -> Optional[str]:
+    """The IP address of this machine that other machines would see, read from its interfaces.
+
+    The rule, for IPv4 first and IPv6 only when there is no usable IPv4 address:
+
+    1. Candidates are the addresses of interfaces that are up (or whose state is unknown),
+       leaving out loopback, link-local and unspecified addresses.
+    2. Of those, the one the routing table uses for outbound traffic (the default route) wins.
+    3. Without a default route, the first candidate in the order the OS lists its interfaces.
+
+    ``None`` only when no interface has a usable address. No DNS lookup is involved.
+    """
+    for family, (socket_family, destination) in _ROUTE_PROBES.items():
+        candidates = [
+            address.address
+            for interface in interfaces.values() if interface.is_up is not False
+            for address in interface.addresses
+            if address.family == family and _reachable(address.address)
+        ]
+        if not candidates:
+            continue
+        routed = _outbound_address(socket_family, destination)
+        if routed is not None:
+            for candidate in candidates:
+                if _ip(candidate) == _ip(routed):
+                    return candidate
+        return candidates[0]
+    return None
 
 
 def get_boot() -> BootInfo:
@@ -119,7 +233,9 @@ def get_cpu(interval: float = DEFAULT_INTERVAL) -> CpuInfo:
 
     With ``interval=0`` the usage is measured since the previous call instead of waiting.
     """
-    freq = _cpu_freq()
+    # psutil has no cpu_freq() on some platforms (e.g. Apple Silicon Macs), and returns None
+    # when the OS does not report frequencies (e.g. many ARM machines and virtual machines).
+    freq = _optional(psutil, 'cpu_freq')
     # Start the total measurement now, so it covers the same window as the per-core one.
     psutil.cpu_percent(interval=None)
     per_core = psutil.cpu_percent(interval=interval, percpu=True)
@@ -142,27 +258,10 @@ def _mhz(value: Optional[float]) -> Optional[float]:
     return None if value is None else round(value, 2)
 
 
-def _cpu_freq() -> Any:
-    # psutil has no cpu_freq() on some platforms (e.g. Apple Silicon Macs), and returns None
-    # when the OS does not report frequencies (e.g. many ARM machines and virtual machines).
-    cpu_freq = getattr(psutil, 'cpu_freq', None)
-    if cpu_freq is None:
-        return None
-    try:
-        return cpu_freq()
-    except (OSError, NotImplementedError):
-        return None
-
-
 def _load_average() -> Optional[List[float]]:
     # Unix only. psutil emulates it on Windows, but the first readings there are always 0.
-    getloadavg = getattr(os, 'getloadavg', None)
-    if getloadavg is None:
-        return None
-    try:
-        return [round(value, 2) for value in getloadavg()]
-    except OSError:
-        return None
+    values = _optional(os, 'getloadavg')
+    return None if values is None else [round(value, 2) for value in values]
 
 
 def get_memory() -> MemoryInfo:
@@ -201,13 +300,20 @@ def get_disks() -> DiskInfo:
             free=usage.free,
             percent=usage.percent,
         ))
-    io = psutil.disk_io_counters()
-    # No disk statistics are available in some containers.
-    return DiskInfo(
-        partitions=partitions,
-        read_bytes=io.read_bytes if io else None,
-        write_bytes=io.write_bytes if io else None,
-    )
+    read_bytes, write_bytes = disk_io_totals()
+    return DiskInfo(partitions=partitions, read_bytes=read_bytes, write_bytes=write_bytes)
+
+
+def disk_io_totals() -> Tuple[Optional[int], Optional[int]]:
+    """Bytes read and written since boot over all disks; None in containers without statistics."""
+    io = _optional(psutil, 'disk_io_counters')
+    return (io.read_bytes, io.write_bytes) if io else (None, None)
+
+
+def net_io_totals() -> Tuple[Optional[int], Optional[int]]:
+    """Bytes sent and received since boot over all interfaces; None without statistics."""
+    io = _optional(psutil, 'net_io_counters')
+    return (io.bytes_sent, io.bytes_recv) if io else (None, None)
 
 
 def _address_family(family: int) -> Optional[str]:
@@ -224,7 +330,8 @@ def _address_family(family: int) -> Optional[str]:
 
 def get_network() -> NetworkInfo:
     """Interfaces with their addresses and link state, and bytes sent and received since boot."""
-    stats = _interface_stats()
+    # Link state is an extra: when the OS cannot tell, the addresses are still listed.
+    stats: Dict[str, Any] = _optional(psutil, 'net_if_stats') or {}
     interfaces = {}
     for name, addresses in psutil.net_if_addrs().items():
         records = []
@@ -240,32 +347,10 @@ def get_network() -> NetworkInfo:
             speed_mbps=(link.speed or None) if link else None,
             mtu=(link.mtu or None) if link else None,
         )
-    io = psutil.net_io_counters()
-    return NetworkInfo(
-        interfaces=interfaces,
-        bytes_sent=io.bytes_sent if io else None,
-        bytes_recv=io.bytes_recv if io else None,
-    )
+    bytes_sent, bytes_recv = net_io_totals()
+    return NetworkInfo(interfaces=interfaces, bytes_sent=bytes_sent, bytes_recv=bytes_recv)
 
 
-def _interface_stats() -> Dict[str, Any]:
-    try:
-        return psutil.net_if_stats()
-    except Exception:  # noqa: BLE001
-        # Link state is an extra: a platform quirk here must never hide the addresses.
-        return {}
-
-
-def _read_sensor(name: str) -> Any:
-    """The result of ``psutil.<name>()``, or None when this OS lacks it or it fails."""
-    read = getattr(psutil, name, None)
-    if read is None:
-        return None
-    try:
-        return read()
-    except Exception:  # noqa: BLE001
-        # Sensors are best effort: unusual hardware drivers make psutil raise all sorts of errors.
-        return None
 
 
 def _seconds_left(secsleft: Optional[int]) -> Optional[int]:
@@ -275,9 +360,9 @@ def _seconds_left(secsleft: Optional[int]) -> Optional[int]:
 
 def get_sensors() -> SensorsInfo:
     """Temperatures (Linux, FreeBSD), fans (Linux) and the battery (laptops on every OS)."""
-    temperatures = _read_sensor('sensors_temperatures')
-    fans = _read_sensor('sensors_fans')
-    battery = _read_sensor('sensors_battery')
+    temperatures = _optional(psutil, 'sensors_temperatures')
+    fans = _optional(psutil, 'sensors_fans')
+    battery = _optional(psutil, 'sensors_battery')
     return SensorsInfo(
         temperatures=None if temperatures is None else [
             Temperature(sensor=name, label=entry.label or None, current=entry.current,
@@ -298,24 +383,19 @@ def get_sensors() -> SensorsInfo:
 
 def _import_nvml() -> Any:
     try:
-        import pynvml  # From the optional nvidia-ml-py package: pip install "showsys[gpu]"
+        import pynvml  # From the optional nvidia-ml-py package, see GPU_EXTRA.
     except ImportError:
         return None
     return pynvml
 
 
 def nvml_installed() -> bool:
-    """Whether the optional NVIDIA library (``showsys[gpu]``) is installed."""
+    """Whether the optional NVIDIA library (:data:`GPU_EXTRA`) is installed."""
     return _import_nvml() is not None
 
 
-def _text(value: Any) -> str:
-    # Old nvidia-ml-py versions return bytes.
-    return value.decode() if isinstance(value, bytes) else str(value)
-
-
 def get_gpus() -> Optional[List[GpuInfo]]:
-    """NVIDIA GPUs, through the optional ``showsys[gpu]`` extra.
+    """NVIDIA GPUs, through the optional :data:`GPU_EXTRA`.
 
     ``None`` when the extra is not installed or no NVIDIA driver is loaded;
     a value a GPU does not support (e.g. power on some laptops) is ``None``.
@@ -345,8 +425,8 @@ def get_gpus() -> Optional[List[GpuInfo]]:
             milliwatts = ask(nvml.nvmlDeviceGetPowerUsage, handle)
             gpus.append(GpuInfo(
                 index=index,
-                name=_text(nvml.nvmlDeviceGetName(handle)),
-                driver_version=None if driver is None else _text(driver),
+                name=nvml.nvmlDeviceGetName(handle),
+                driver_version=driver,
                 memory_total=memory.total if memory else None,
                 memory_used=memory.used if memory else None,
                 memory_free=memory.free if memory else None,
@@ -361,8 +441,20 @@ def get_gpus() -> Optional[List[GpuInfo]]:
         ask(nvml.nvmlShutdown)
 
 
-#: Orders accepted by :func:`get_processes`.
-PROCESS_SORT_KEYS: Tuple[str, ...] = ('cpu', 'memory')
+class ProcessOrder(NamedTuple):
+    """One way to rank processes: a name for people and the value to rank by, biggest first."""
+    label: str
+    key: Callable[[ProcessInfo], float]
+
+
+#: Orders accepted by :func:`get_processes` and ``--sort``; the first one is the default.
+PROCESS_ORDERS: Dict[str, ProcessOrder] = {
+    'cpu': ProcessOrder('CPU', lambda p: p.cpu_percent),
+    # Processes the OS hides the memory of rank last.
+    'memory': ProcessOrder('memory', lambda p: p.memory_rss or 0),
+}
+PROCESS_SORT_KEYS: Tuple[str, ...] = tuple(PROCESS_ORDERS)
+DEFAULT_SORT = PROCESS_SORT_KEYS[0]
 
 
 class _ProcessSampler:
@@ -409,10 +501,7 @@ class _ProcessSampler:
                 memory_percent=memory_percent,
                 memory_rss=memory_rss,
             ))
-        if sort_by == 'memory':
-            found.sort(key=lambda p: p.memory_rss or 0, reverse=True)
-        else:
-            found.sort(key=lambda p: p.cpu_percent, reverse=True)
+        found.sort(key=PROCESS_ORDERS[sort_by].key, reverse=True)
         return found[:limit]
 
 
@@ -423,9 +512,11 @@ def _check_top(limit: int, sort_by: str) -> None:
         raise ValueError(f"unknown sort key {sort_by!r}; choose from {', '.join(PROCESS_SORT_KEYS)}")
 
 
-def get_processes(limit: int = 5, sort_by: str = 'cpu',
+def get_processes(limit: int = DEFAULT_TOP, sort_by: str = DEFAULT_SORT,
                   interval: float = DEFAULT_INTERVAL) -> List[ProcessInfo]:
-    """The ``limit`` busiest processes by ``'cpu'`` or ``'memory'``, CPU measured over ``interval``.
+    """The ``limit`` busiest processes, ranked by one of :data:`PROCESS_ORDERS`.
+
+    CPU use is measured over ``interval`` seconds.
 
     Processes the OS does not let this user inspect are left out, or listed without memory.
     """
@@ -449,7 +540,7 @@ def _check_sections(sections: Sequence[str]) -> List[str]:
 
 
 def gather(sections: Sequence[str] = (), interval: float = DEFAULT_INTERVAL,
-           top: int = 5, sort_by: str = 'cpu') -> Dict[str, Any]:
+           top: int = DEFAULT_TOP, sort_by: str = DEFAULT_SORT) -> Dict[str, Any]:
     """Like :func:`collect`, but returns the records themselves instead of dicts."""
     wanted = _check_sections(sections)
     sampler = None
@@ -488,7 +579,7 @@ def to_jsonable(value: Any) -> Any:
 
 
 def collect(*sections: str, interval: float = DEFAULT_INTERVAL,
-            top: int = 5, sort_by: str = 'cpu') -> Dict[str, Any]:
+            top: int = DEFAULT_TOP, sort_by: str = DEFAULT_SORT) -> Dict[str, Any]:
     """Collect sections of system information as plain dicts, ready for ``json.dumps``.
 
     Example::

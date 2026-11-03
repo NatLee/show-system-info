@@ -39,26 +39,6 @@ jobs:
       - name: Run tests
         # Runs tox with the Python version on PATH and lists the slowest tests
         run: tox -e py -- --durations=10
-      - name: Time the system calls behind the summary
-        # macOS runners have spent ~35 s in the summary; this shows which call takes the time.
-        shell: bash
-        run: |
-          python - <<'EOF'
-          import platform, socket, time, uuid
-          calls = {
-              'socket.gethostname()': socket.gethostname,
-              'socket.gethostbyname(hostname)': lambda: socket.gethostbyname(socket.gethostname()),
-              'uuid.getnode()': uuid.getnode,
-              'platform.uname()': platform.uname,
-          }
-          for name, call in calls.items():
-              start = time.time()
-              try:
-                  result = call()
-              except OSError as error:
-                  result = error
-              print(f'{name}: {time.time() - start:.2f}s -> {result}')
-          EOF
       - name: Run showsys on this machine
         # Shows the real output and how long it takes on each OS
         shell: bash

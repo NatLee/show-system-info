@@ -43,8 +43,8 @@ def test_json_values_are_numbers(fake_machine, capsys):
         'family': 'ipv4', 'address': '192.168.1.10', 'netmask': '255.255.255.0', 'broadcast': '192.168.1.255'}
 
 
-def test_json_uses_null_for_missing_values(fake_machine, capsys, monkeypatch):
-    monkeypatch.setattr('socket.gethostbyname', lambda name: (_ for _ in ()).throw(OSError('no')))
+def test_json_uses_null_for_missing_values(fake_machine, capsys):
+    fake_machine.interfaces = {'lo': fake_machine.interfaces['lo']}  # no usable address
     assert _json(capsys, '--json')['system']['ip_address'] is None
 
 

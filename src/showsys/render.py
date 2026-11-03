@@ -4,8 +4,9 @@ The ``*_dict`` functions build the dicts that the :class:`showsys.ShowSys` metho
 always returned; :func:`enum` prints them. Their output must not change: scripts read it.
 """
 from datetime import datetime, timedelta
-from typing import Any, Collection, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence
 
+from .collectors import DEFAULT_SORT, GPU_EXTRA, PROCESS_ORDERS
 from .models import (
     Battery,
     BootInfo,
@@ -26,17 +27,21 @@ NA = 'N/A'
 
 BORDER = '================='
 
-_SIZE_UNITS = ('', 'K', 'M', 'G', 'T', 'P')
+_SIZE_STEP = 1024
+_SIZE_UNITS = ('', 'K', 'M', 'G', 'T', 'P', 'E')
+
+# ShowSys 1.0 printed lists longer than this with this many items per line.
+_ITEMS_PER_LINE = 4
 
 
 def size(num_bytes: float, suffix: str = 'B') -> str:
     """Format a byte count with binary units, e.g. ``1536`` -> ``1.50KB``."""
     value = num_bytes
-    for unit in _SIZE_UNITS:
-        if value < 1024:
+    for unit in _SIZE_UNITS[:-1]:
+        if value < _SIZE_STEP:
             return f'{value:.2f}{unit}{suffix}'
-        value /= 1024
-    return f'{value:.2f}E{suffix}'
+        value /= _SIZE_STEP
+    return f'{value:.2f}{_SIZE_UNITS[-1]}{suffix}'
 
 
 def size_or_na(num_bytes: Optional[float], suffix: str = 'B') -> str:
@@ -158,10 +163,10 @@ def enum(info: Mapping[str, Any]) -> str:
     for key, value in info.items():
         if isinstance(value, list):
             output += f'{key}:\n'
-            if len(value) > 4:
-                # Four items per line. str(): the items can be dicts, e.g. disk partitions.
-                for i in range(0, len(value), 4):
-                    output += '\t'.join(str(item) for item in value[i:i + 4]) + '\n'
+            if len(value) > _ITEMS_PER_LINE:
+                # str(): the items can be dicts, e.g. disk partitions.
+                for i in range(0, len(value), _ITEMS_PER_LINE):
+                    output += '\t'.join(str(item) for item in value[i:i + _ITEMS_PER_LINE]) + '\n'
             else:
                 for item in value:
                     output += f'\t{item}\n'
@@ -174,6 +179,21 @@ def enum(info: Mapping[str, Any]) -> str:
     return output
 
 
+#: What `showsys` (and ShowSys.info()) and `showsys -d` (and detail_info()) show, in order.
+SUMMARY_SECTIONS = ('system', 'memory', 'swap')
+DETAIL_SECTIONS = ('system', 'boot', 'cpu', 'memory', 'swap', 'network')
+
+#: The 1.0 display dict of each section in DETAIL_SECTIONS, for --all.
+LEGACY_DICTS: Dict[str, Callable[[Any], Dict[str, Any]]] = {
+    'system': system_dict,
+    'boot': boot_dict,
+    'cpu': cpu_dict,
+    'memory': memory_dict,
+    'swap': swap_dict,
+    'network': network_dict,
+}
+
+
 def framed(*sections: Mapping[str, Any]) -> str:
     """Sections between two borders, as printed by ``info()`` and ``detail_info()``."""
     return BORDER + '\n' + ''.join(enum(section) for section in sections) + BORDER
@@ -181,23 +201,44 @@ def framed(*sections: Mapping[str, Any]) -> str:
 
 # Text for the options added after 1.0 (--disk, ...). These are free to improve.
 
-def table(headers: Sequence[str], rows: Sequence[Sequence[str]], right: Collection[int] = ()) -> str:
-    """Columns separated by two spaces; the columns listed in ``right`` are right-aligned."""
-    widths = [max(len(cell) for cell in column) for column in zip(headers, *rows)]
-    lines = []
-    for row in [headers, *rows]:
-        cells = [cell.rjust(width) if i in right else cell.ljust(width)
-                 for i, (cell, width) in enumerate(zip(row, widths))]
-        lines.append('  '.join(cells).rstrip())
+class Column(NamedTuple):
+    """A column of a text table: its header, its alignment and the widest value it expects."""
+    header: str
+    right: bool = False
+    """Right-align, for numbers."""
+    sample: str = ''
+    """A value as wide as the widest one, for tables printed a line at a time (--watch)."""
+
+    def width(self, cells: Sequence[str] = ()) -> int:
+        return max(len(self.header), len(self.sample), *(len(cell) for cell in cells))
+
+
+def _row(columns: Sequence[Column], cells: Sequence[str], widths: Sequence[int]) -> str:
+    """One line of a table: cells separated by two spaces, without trailing blanks."""
+    return '  '.join(cell.rjust(width) if column.right else cell.ljust(width)
+                     for column, cell, width in zip(columns, cells, widths)).rstrip()
+
+
+def table(columns: Sequence[Column], rows: Sequence[Sequence[str]]) -> str:
+    """A header line and a line per row, each column as wide as its widest cell."""
+    widths = [column.width([row[i] for row in rows]) for i, column in enumerate(columns)]
+    lines = [_row(columns, [column.header for column in columns], widths)]
+    lines += [_row(columns, row, widths) for row in rows]
     return '\n'.join(lines) + '\n'
+
+
+_DISK_COLUMNS = (
+    Column('DEVICE'), Column('MOUNTPOINT'), Column('TYPE'),
+    Column('TOTAL', right=True), Column('USED', right=True), Column('FREE', right=True),
+    Column('USE%', right=True),
+)
 
 
 def disk_text(info: DiskInfo) -> str:
     if info.partitions:
         rows = [[p.device, p.mountpoint, p.fstype, size(p.total), size(p.used), size(p.free), percent(p.percent)]
                 for p in info.partitions]
-        text = 'Partitions:\n' + table(
-            ['DEVICE', 'MOUNTPOINT', 'TYPE', 'TOTAL', 'USED', 'FREE', 'USE%'], rows, right={3, 4, 5, 6})
+        text = 'Partitions:\n' + table(_DISK_COLUMNS, rows)
     else:
         text = f'Partitions: {NA}\n'
     return text + f'Total read: {size_or_na(info.read_bytes)}\nTotal write: {size_or_na(info.write_bytes)}\n'
@@ -243,23 +284,30 @@ def sensors_text(info: SensorsInfo) -> str:
     return '\n'.join(lines) + '\n'
 
 
-def processes_text(processes: Sequence[ProcessInfo], sort_by: str = 'cpu') -> str:
+_PROCESS_COLUMNS = (
+    Column('PID', right=True), Column('NAME'), Column('CPU%', right=True),
+    Column('MEM%', right=True), Column('MEMORY', right=True), Column('USER'),
+)
+# Long process names (common on macOS) would push the other columns off the screen.
+_MAX_NAME_WIDTH = 30
+
+
+def processes_text(processes: Sequence[ProcessInfo], sort_by: str = DEFAULT_SORT) -> str:
     if not processes:
         return f'Processes: {NA}\n'
-    order = 'memory' if sort_by == 'memory' else 'CPU'
     rows = [[
         str(p.pid),
-        (p.name or NA)[:30],
+        (p.name or NA)[:_MAX_NAME_WIDTH],
         f'{p.cpu_percent:.1f}%',
         NA if p.memory_percent is None else f'{p.memory_percent:.1f}%',
         size_or_na(p.memory_rss),
         p.username or NA,
     ] for p in processes]
-    return f'Top {len(processes)} processes by {order}:\n' + table(
-        ['PID', 'NAME', 'CPU%', 'MEM%', 'MEMORY', 'USER'], rows, right={0, 2, 3, 4})
+    return f'Top {len(processes)} processes by {PROCESS_ORDERS[sort_by].label}:\n' + table(
+        _PROCESS_COLUMNS, rows)
 
 
-GPU_EXTRA_HINT = 'NVIDIA GPUs only; install the extra: pip install "showsys[gpu]"'
+GPU_EXTRA_HINT = f'NVIDIA GPUs only; install the extra: pip install "{GPU_EXTRA}"'
 
 
 def gpu_text(gpus: Optional[Sequence[GpuInfo]], nvml_installed: bool = True) -> str:
@@ -286,16 +334,11 @@ def gpu_text(gpus: Optional[Sequence[GpuInfo]], nvml_installed: bool = True) -> 
     return '\n'.join(lines) + '\n'
 
 
-def all_text(records: Mapping[str, Any], sort_by: str = 'cpu', nvml_installed: bool = True) -> str:
+def all_text(records: Mapping[str, Any], sort_by: str = DEFAULT_SORT, nvml_installed: bool = True) -> str:
     """Every section between borders: the ``detail_info()`` text, then disks, sensors,
     processes and GPUs. ``records`` is what ``collectors.gather()`` returns for all sections."""
-    return (BORDER + '\n'
-            + enum(system_dict(records['system']))
-            + enum(boot_dict(records['boot']))
-            + enum(cpu_dict(records['cpu']))
-            + enum(memory_dict(records['memory']))
-            + enum(swap_dict(records['swap']))
-            + enum(network_dict(records['network']))
+    details = ''.join(enum(LEGACY_DICTS[name](records[name])) for name in DETAIL_SECTIONS)
+    return (BORDER + '\n' + details
             + disk_text(records['disk'])
             + sensors_text(records['sensors'])
             + processes_text(records['processes'], sort_by)
@@ -303,17 +346,30 @@ def all_text(records: Mapping[str, Any], sort_by: str = 'cpu', nvml_installed: b
             + BORDER)
 
 
-_WATCH_LINE = '{:<8}  {:>6}  {:>6}  {:>6}  {:>10}  {:>10}  {:>11}  {:>12}'
+# --watch prints a line at a time, so each column is as wide as its widest possible value.
+_WIDEST_PERCENT = '100.0%'
+# Rounding can show 1024.00 next to a unit letter, e.g. '1024.00KB': the widest size().
+_WIDEST_SIZE = size(_SIZE_STEP ** 2 - 1)
+_WATCH_COLUMNS = (
+    Column('TIME', sample='00:00:00'),
+    Column('CPU', right=True, sample=_WIDEST_PERCENT),
+    Column('MEM', right=True, sample=_WIDEST_PERCENT),
+    Column('SWAP', right=True, sample=_WIDEST_PERCENT),
+    Column('NET SENT/s', right=True, sample=_WIDEST_SIZE),
+    Column('NET RECV/s', right=True, sample=_WIDEST_SIZE),
+    Column('DISK READ/s', right=True, sample=_WIDEST_SIZE),
+    Column('DISK WRITE/s', right=True, sample=_WIDEST_SIZE),
+)
+_WATCH_WIDTHS = [column.width() for column in _WATCH_COLUMNS]
 
 
 def watch_header() -> str:
-    return _WATCH_LINE.format(
-        'TIME', 'CPU', 'MEM', 'SWAP', 'NET SENT/s', 'NET RECV/s', 'DISK READ/s', 'DISK WRITE/s')
+    return _row(_WATCH_COLUMNS, [column.header for column in _WATCH_COLUMNS], _WATCH_WIDTHS)
 
 
 def watch_line(rates: Rates) -> str:
-    return _WATCH_LINE.format(
-        rates.timestamp[11:19],  # HH:MM:SS of the ISO 8601 time
+    return _row(_WATCH_COLUMNS, [
+        datetime.fromisoformat(rates.timestamp).strftime('%H:%M:%S'),
         f'{rates.cpu_percent:.1f}%',
         f'{rates.memory_percent:.1f}%',
         f'{rates.swap_percent:.1f}%',
@@ -321,4 +377,4 @@ def watch_line(rates: Rates) -> str:
         size_or_na(rates.net_recv_per_sec),
         size_or_na(rates.disk_read_per_sec),
         size_or_na(rates.disk_write_per_sec),
-    )
+    ], _WATCH_WIDTHS)

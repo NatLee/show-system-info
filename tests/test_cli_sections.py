@@ -240,3 +240,36 @@ def test_all_works_on_this_machine(capsys):
                     'Total Bytes Sent:', 'Total read:', 'Battery:', 'GPU'):
         assert heading in text
     assert list(_json(capsys, '-a')) == ['timestamp'] + list(showsys.SECTIONS)
+
+
+def test_top_default_count_comes_from_collectors(fake_machine, capsys, monkeypatch):
+    from showsys import collectors
+    monkeypatch.setattr(collectors, 'DEFAULT_TOP', 2)
+    assert _text(capsys, '--top').startswith('Top 2 processes')
+    assert len(_json(capsys, '--top')['processes']) == 2
+
+
+@pytest.mark.parametrize('order', list(showsys.collectors.PROCESS_ORDERS))
+def test_every_process_order_ranks_and_labels_the_list(fake_machine, capsys, order):
+    spec = showsys.collectors.PROCESS_ORDERS[order]
+    rows = _json(capsys, '--top', '--sort', order)['processes']
+    values = [spec.key(showsys.models.ProcessInfo(**row)) for row in rows]
+    assert values == sorted(values, reverse=True)
+    assert _text(capsys, '--top', '--sort', order).startswith(f'Top 3 processes by {spec.label}:')
+
+
+def test_a_bug_in_a_sensor_reading_is_reported_not_hidden(fake_machine, capsys, monkeypatch):
+    # Only "the OS cannot tell" (OSError, NotImplementedError, psutil errors) becomes N/A.
+    def buggy(*args, **kwargs):
+        raise TypeError('unexpected argument')
+    monkeypatch.setattr(psutil, 'sensors_temperatures', buggy, raising=False)
+
+    assert main(['--sensors']) == 1
+    assert 'An unexpected error occurred: unexpected argument' in capsys.readouterr().out
+
+
+def test_access_denied_counts_as_not_available(fake_machine, capsys, monkeypatch):
+    def denied(*args, **kwargs):
+        raise psutil.AccessDenied()
+    monkeypatch.setattr(psutil, 'sensors_battery', denied, raising=False)
+    assert 'Battery: N/A' in _text(capsys, '--sensors')

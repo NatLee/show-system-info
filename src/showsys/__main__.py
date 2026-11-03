@@ -1,5 +1,7 @@
-"""``python -m showsys`` works like the ``showsys`` command."""
+"""``python -m showsys`` works like the ``showsys`` command, exit status included."""
+import sys
+
 from .cli import main
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
