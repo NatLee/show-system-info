@@ -1,192 +1,67 @@
-from typing import Dict, Union
-import platform
-import re
-import socket
-import uuid
-from datetime import datetime
+"""The original ShowSys interface: each method returns a dict of display strings.
 
-import psutil
-import cpuinfo
+The data comes from :mod:`showsys.collectors` and the formatting from :mod:`showsys.render`.
+New code that wants numbers instead of strings can call those modules, or
+:func:`showsys.collect`, directly.
+"""
+from typing import Any, Dict, Mapping
 
-# Shown instead of a value the operating system does not report.
-_NOT_AVAILABLE = "N/A"
+from . import collectors, render
+
 
 class ShowSys:
 
-    def get_size(self, bytes, suffix="B") -> str:
-        factor = 1024
-        for unit in ["", "K", "M", "G", "T", "P"]:
-            if bytes < factor:
-                return f"{bytes:.2f}{unit}{suffix}"
-            bytes /= factor
+    def get_size(self, bytes: float, suffix: str = 'B') -> str:
+        """Format a byte count with binary units, e.g. ``1536`` -> ``1.50KB``."""
+        return render.size(bytes, suffix)
 
     def system_information(self) -> Dict[str, str]:
-        uname = platform.uname()
-        return {
-            "System": uname.system,
-            "Node Name": uname.node,
-            "Release": uname.release,
-            "Version": uname.version,
-            "Machine": uname.machine,
-            "Processor": uname.processor,
-            # py-cpuinfo leaves out fields it cannot detect.
-            "Processor Brand": cpuinfo.get_cpu_info().get('brand_raw', _NOT_AVAILABLE),
-            "IP-Address": self._ip_address(),
-            "Mac-Address": ':'.join(re.findall('..', '%012x' % uuid.getnode())),
-        }
-
-    def _ip_address(self) -> str:
-        try:
-            return socket.gethostbyname(socket.gethostname())
-        except OSError:
-            # The host name is not in DNS or the hosts file (common on macOS and in containers).
-            return _NOT_AVAILABLE
+        return render.system_dict(collectors.get_system())
 
     def boot_time(self) -> Dict[str, str]:
-        boot_time_timestamp = psutil.boot_time()
-        bt = datetime.fromtimestamp(boot_time_timestamp)
-        return {
-            "Boot Time": f"{bt.year}/{bt.month}/{bt.day} {bt.hour}:{bt.minute}:{bt.second}"
-        }
+        return render.boot_dict(collectors.get_boot())
 
-    def cpu_info(self) -> Dict[str, Union[str, int, float]]:
-        # psutil has no cpu_freq() on some platforms (e.g. Apple Silicon Macs).
-        cpufreq = psutil.cpu_freq() if hasattr(psutil, "cpu_freq") else None
-        if cpufreq is None:
-            # The OS does not report CPU frequencies (e.g. many ARM machines and virtual machines).
-            max_freq = min_freq = current_freq = _NOT_AVAILABLE
-        else:
-            max_freq = f"{cpufreq.max:.2f}Mhz"
-            min_freq = f"{cpufreq.min:.2f}Mhz"
-            current_freq = f"{cpufreq.current:.2f}Mhz"
-        return {
-            "Physical cores": psutil.cpu_count(logical=False),
-            "Total cores": psutil.cpu_count(logical=True),
-            "Max Frequency": max_freq,
-            "Min Frequency": min_freq,
-            "Current Frequency": current_freq,
-            "CPU Usage Per Core": [f"{percentage}%" for percentage in psutil.cpu_percent(percpu=True, interval=1)],
-            "Total CPU Usage": f"{psutil.cpu_percent()}%"
-        }
+    def cpu_info(self) -> Dict[str, Any]:
+        """CPU counts, frequencies and usage. Takes one second to measure the usage."""
+        return render.cpu_dict(collectors.get_cpu())
 
-    def memory_info(self) -> Dict[str, Union[str, int, float]]:
-        svmem = psutil.virtual_memory()
-        return {
-            "Memory Total": self.get_size(svmem.total),
-            "Memory Available": self.get_size(svmem.available),
-            "Memory Used": self.get_size(svmem.used),
-            "Memory Percentage": f"{svmem.percent}%"
-        }
+    def memory_info(self) -> Dict[str, str]:
+        return render.memory_dict(collectors.get_memory())
 
-    def swap_info(self) -> Dict[str, Union[str, int, float]]:
-        swap = psutil.swap_memory()
-        return {
-            "Swap Total": self.get_size(swap.total),
-            "Swap Free": self.get_size(swap.free),
-            "Swap Used": self.get_size(swap.used),
-            "Swap Percentage": f"{swap.percent}%"
-        }
+    def swap_info(self) -> Dict[str, str]:
+        return render.swap_dict(collectors.get_swap())
 
-    def disk_info(self) -> Dict[str, Union[str, int, float]]:
-        partitions = psutil.disk_partitions()
-        disk_info = {"Partitions": []}
-        for partition in partitions:
-            try:
-                partition_usage = psutil.disk_usage(partition.mountpoint)
-                disk_info["Partitions"].append({
-                    "Device": partition.device,
-                    "Mountpoint": partition.mountpoint,
-                    "File system type": partition.fstype,
-                    "Total Size": self.get_size(partition_usage.total),
-                    "Used": self.get_size(partition_usage.used),
-                    "Free": self.get_size(partition_usage.free),
-                    "Percentage": f"{partition_usage.percent}%"
-                })
-            except PermissionError:
-                continue
-        disk_io = psutil.disk_io_counters()
-        if disk_io is None:
-            # No disk statistics are available (e.g. in some containers).
-            disk_info["Total read"] = disk_info["Total write"] = _NOT_AVAILABLE
-        else:
-            disk_info["Total read"] = self.get_size(disk_io.read_bytes)
-            disk_info["Total write"] = self.get_size(disk_io.write_bytes)
-        return disk_info
+    def disk_info(self) -> Dict[str, Any]:
+        return render.disk_dict(collectors.get_disks())
 
-    def network_info(self) -> Dict[str, Union[str, int, float]]:
-        if_addrs = psutil.net_if_addrs()
-        net_info = {}
-        for interface_name, interface_addresses in if_addrs.items():
-            addresses = []
-            for address in interface_addresses:
-                # Compare the values, not their text: str() of these enums changed in Python 3.11.
-                # psutil.AF_LINK is the MAC address family on every OS (AF_PACKET only exists on Linux).
-                if address.family == socket.AF_INET:
-                    addresses.append({
-                        "IP Address": address.address,
-                        "Netmask": address.netmask,
-                        "Broadcast IP": address.broadcast
-                    })
-                elif address.family == psutil.AF_LINK:
-                    addresses.append({
-                        "MAC Address": address.address,
-                        "Netmask": address.netmask,
-                        "Broadcast MAC": address.broadcast
-                    })
-            net_info[interface_name] = addresses
-        net_io = psutil.net_io_counters()
-        net_info["Total Bytes Sent"] = self.get_size(net_io.bytes_sent)
-        net_info["Total Bytes Received"] = self.get_size(net_io.bytes_recv)
-        return net_info
+    def network_info(self) -> Dict[str, Any]:
+        return render.network_dict(collectors.get_network())
 
-    def enum(self, info: Dict[str, Union[str, int, float]]) -> str:
+    def enum(self, info: Mapping[str, Any]) -> str:
         """
         Enumerate the information in a readable format.
 
         :param info: The information to enumerate.
         """
-        output_str = ""
-        for key, value in info.items():
-            if isinstance(value, list):
-                output_str += f"{key}:" + "\n"
-                if len(value) > 4:
-                    # split the list for each 4 items in one column
-                    for i in range(0, len(value), 4):
-                        output_str += "\t".join(value[i:i+4]) + "\n"
-                else:
-                    for item in value:
-                        output_str += f"\t{item}" + "\n"
-            elif isinstance(value, dict):
-                output_str += f"{key}:" + "\n"
-                for k, v in value.items():
-                    output_str += f"\t{k}: {v}" + "\n"
-            else:
-                output_str += f"{key}: {value}" + "\n"
-        return output_str
+        return render.enum(info)
 
     def detail_info(self, show: bool = True) -> str:
-        output_str = "=================" + "\n"
-        output_str += self.enum(self.system_information())
-        output_str += self.enum(self.boot_time())
-        output_str += self.enum(self.cpu_info())
-        output_str += self.enum(self.memory_info())
-        output_str += self.enum(self.swap_info())
-        output_str += self.enum(self.network_info())
-        output_str += "================="
-
+        """System, boot time, CPU, memory, swap and network. Prints it unless ``show=False``."""
+        output = render.framed(
+            self.system_information(),
+            self.boot_time(),
+            self.cpu_info(),
+            self.memory_info(),
+            self.swap_info(),
+            self.network_info(),
+        )
         if show:
-            print(output_str)
-
-        return output_str
+            print(output)
+        return output
 
     def info(self, show: bool = True) -> str:
-        output_str = "=================" + "\n"
-        output_str += self.enum(self.system_information())
-        output_str += self.enum(self.memory_info())
-        output_str += self.enum(self.swap_info())
-        output_str += "================="
-
+        """System, memory and swap. Prints it unless ``show=False``."""
+        output = render.framed(self.system_information(), self.memory_info(), self.swap_info())
         if show:
-            print(output_str)
-
-        return output_str
+            print(output)
+        return output
