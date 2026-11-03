@@ -14,6 +14,7 @@ from .collectors import (
     get_swap,
     get_system,
 )
+from .live import watch
 from .showsys import ShowSys
 from .cli import main
 
@@ -32,4 +33,5 @@ __all__ = [
     'get_swap',
     'get_system',
     'main',
+    'watch',
 ]

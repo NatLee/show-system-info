@@ -15,6 +15,7 @@ from .models import (
     MemoryInfo,
     NetworkInfo,
     ProcessInfo,
+    Rates,
     SensorsInfo,
     SwapInfo,
     SystemInfo,
@@ -300,3 +301,24 @@ def all_text(records: Mapping[str, Any], sort_by: str = 'cpu', nvml_installed: b
             + processes_text(records['processes'], sort_by)
             + gpu_text(records['gpu'], nvml_installed)
             + BORDER)
+
+
+_WATCH_LINE = '{:<8}  {:>6}  {:>6}  {:>6}  {:>10}  {:>10}  {:>11}  {:>12}'
+
+
+def watch_header() -> str:
+    return _WATCH_LINE.format(
+        'TIME', 'CPU', 'MEM', 'SWAP', 'NET SENT/s', 'NET RECV/s', 'DISK READ/s', 'DISK WRITE/s')
+
+
+def watch_line(rates: Rates) -> str:
+    return _WATCH_LINE.format(
+        rates.timestamp[11:19],  # HH:MM:SS of the ISO 8601 time
+        f'{rates.cpu_percent:.1f}%',
+        f'{rates.memory_percent:.1f}%',
+        f'{rates.swap_percent:.1f}%',
+        size_or_na(rates.net_sent_per_sec),
+        size_or_na(rates.net_recv_per_sec),
+        size_or_na(rates.disk_read_per_sec),
+        size_or_na(rates.disk_write_per_sec),
+    )

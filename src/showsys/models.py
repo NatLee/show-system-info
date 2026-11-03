@@ -172,3 +172,19 @@ class GpuInfo(Record):
     utilization_percent: Optional[float]
     temperature_c: Optional[float]
     power_watts: Optional[float]
+
+
+@dataclass
+class Rates(Record):
+    """One reading of :func:`showsys.watch`; throughput is in bytes per second."""
+    timestamp: str
+    """Local time of the reading, ISO 8601."""
+    interval_seconds: float
+    """Time since the previous reading, which every value here covers."""
+    cpu_percent: float
+    memory_percent: float
+    swap_percent: float
+    net_sent_per_sec: Optional[float]
+    net_recv_per_sec: Optional[float]
+    disk_read_per_sec: Optional[float]
+    disk_write_per_sec: Optional[float]

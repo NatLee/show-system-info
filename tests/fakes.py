@@ -75,6 +75,8 @@ class FakeMachine:
         self.fans = {'thinkpad': [Fan('', 2400)]}
         self.battery = Battery(percent=87.0, secsleft=5025, power_plugged=False)
         self.slept = []
+        self.clock = 1000.0
+        self.on_sleep = []
         self.processes = [
             FakeProcess(101, 'python', 'nat', cpu=12.34, rss=300 * MB, memory_percent=1.83),
             FakeProcess(202, 'postgres', 'postgres', cpu=3.0, rss=1 * GB, memory_percent=6.25),
@@ -85,7 +87,11 @@ class FakeMachine:
         return list(self.per_core) if percpu else self.total_cpu
 
     def sleep(self, seconds):
+        """Time passes only on the fake clock; on_sleep hooks can add traffic meanwhile."""
         self.slept.append(seconds)
+        self.clock += seconds
+        for hook in self.on_sleep:
+            hook(seconds)
 
     def cpu_count(self, logical=True):
         return self.logical_cores if logical else self.physical_cores

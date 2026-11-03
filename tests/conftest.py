@@ -8,7 +8,7 @@ import cpuinfo
 import psutil
 import pytest
 
-from showsys import collectors
+from showsys import collectors, live
 
 from .fakes import FakeMachine
 
@@ -43,4 +43,5 @@ def fake_machine(monkeypatch):
     monkeypatch.setattr(psutil, 'process_iter', lambda *args, **kwargs: iter(machine.processes))
     # Measurements wait for real time to pass; the fake machine only records how long.
     monkeypatch.setattr(time, 'sleep', machine.sleep)
+    monkeypatch.setattr(live, '_clock', lambda: machine.clock)
     return machine

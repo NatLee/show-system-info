@@ -1,12 +1,14 @@
 """The ``showsys`` command."""
 import argparse
+import io
 import json
+import os
 import sys
 import traceback
 from typing import Any, Callable, List, NamedTuple, Optional, TextIO, Tuple
 
 from . import __version__
-from . import collectors, render
+from . import collectors, live, render
 from .collectors import collect
 from .showsys import ShowSys
 
@@ -94,6 +96,9 @@ def cli(args: argparse.Namespace) -> None:
     # getattr: callers that build the Namespace themselves may not set the newer options.
     as_json = getattr(args, 'json', False)
     try:
+        if getattr(args, 'watch', None):
+            _watch(args.watch, getattr(args, 'count', None), as_json)
+            return
         view = pick_view(args)
         if as_json:
             print(json.dumps(collect(*view.sections, top=_top(args), sort_by=_sort(args)), indent=2))
@@ -102,6 +107,36 @@ def cli(args: argparse.Namespace) -> None:
     except Exception as e:
         # Keep stdout clean for JSON readers: the report goes to stderr in that mode.
         _report(e, sys.stderr if as_json else sys.stdout)
+
+
+def _watch(interval: float, count: Optional[int], as_json: bool) -> None:
+    """Print a line per reading (JSON Lines with --json) until done, Ctrl+C or a closed pipe."""
+    try:
+        if not as_json:
+            print(render.watch_header(), flush=True)
+        for rates in live.watch(interval, count):
+            line = json.dumps(rates.to_dict()) if as_json else render.watch_line(rates)
+            print(line, flush=True)
+    except KeyboardInterrupt:
+        pass
+    except BrokenPipeError:
+        # `showsys --watch | head -3`: the reader is gone. Point stdout at devnull so
+        # Python's final flush does not complain about the closed pipe either.
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        except (OSError, ValueError, io.UnsupportedOperation):
+            pass
+
+
+def _positive_float(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        value = 0.0
+    if not value > 0:
+        raise argparse.ArgumentTypeError(f'expected a number of seconds above 0, got {text!r}')
+    return value
 
 
 def _positive_int(text: str) -> int:
@@ -144,6 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
     output.add_argument('-j', '--json', action='store_true',
                         help='Print JSON instead of text: plain numbers (bytes, MHz, percent) and null '
                              'for values this OS does not report.')
+
+    live_mode = parser.add_argument_group('live mode')
+    live_mode.add_argument('-w', '--watch', nargs='?', const=1.0, type=_positive_float, metavar='SECONDS',
+                           help='Print CPU, memory and swap use and network and disk throughput every '
+                                'SECONDS (default 1) until Ctrl+C. With --json: one JSON object per line.')
+    live_mode.add_argument('--count', type=_positive_int, metavar='N',
+                           help='Stop --watch after N readings.')
     return parser
 
 
@@ -153,5 +195,10 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     :param argv: Command-line arguments without the program name. Defaults to ``sys.argv[1:]``.
     """
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.count is not None and args.watch is None:
+        parser.error('--count only works together with --watch')
+    if args.watch is not None and any(getattr(args, view.option) for view in VIEWS):
+        parser.error('--watch has its own columns; leave out the section options')
     cli(args)
