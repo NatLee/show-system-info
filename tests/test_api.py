@@ -148,3 +148,10 @@ def test_collect_works_on_this_machine():
     data = showsys.collect(interval=0.1)
     text = json.dumps(data)
     assert '"memory"' in text
+
+
+def test_get_cpu_rounds_frequencies_to_two_decimals(fake_machine):
+    fake_machine.cpu_freq = fake_machine.cpu_freq._replace(current=4291.815000000001, max=5752.0039)
+    info = showsys.get_cpu(interval=0)
+    assert (info.freq_current_mhz, info.freq_max_mhz) == (4291.82, 5752.0)
+    assert showsys.ShowSys().cpu_info()['Current Frequency'] == '4291.82Mhz'

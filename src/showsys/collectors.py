@@ -127,14 +127,19 @@ def get_cpu(interval: float = DEFAULT_INTERVAL) -> CpuInfo:
     return CpuInfo(
         physical_cores=psutil.cpu_count(logical=False),
         logical_cores=psutil.cpu_count(logical=True),
-        freq_current_mhz=freq.current if freq else None,
+        freq_current_mhz=_mhz(freq.current) if freq else None,
         # psutil reports 0.0 when it cannot tell the minimum or maximum.
-        freq_min_mhz=(freq.min or None) if freq else None,
-        freq_max_mhz=(freq.max or None) if freq else None,
+        freq_min_mhz=_mhz(freq.min or None) if freq else None,
+        freq_max_mhz=_mhz(freq.max or None) if freq else None,
         usage_percent=total,
         usage_per_core=list(per_core),
         load_average=_load_average(),
     )
+
+
+def _mhz(value: Optional[float]) -> Optional[float]:
+    # psutil's readings carry float noise such as 4291.815000000001; the text shows two decimals.
+    return None if value is None else round(value, 2)
 
 
 def _cpu_freq() -> Any:
