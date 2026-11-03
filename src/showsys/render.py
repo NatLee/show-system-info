@@ -13,6 +13,7 @@ from .models import (
     DiskInfo,
     MemoryInfo,
     NetworkInfo,
+    ProcessInfo,
     SensorsInfo,
     SwapInfo,
     SystemInfo,
@@ -238,3 +239,19 @@ def sensors_text(info: SensorsInfo) -> str:
         lines.append(f'Fans: {NA}')
     lines.append(f'Battery: {_battery_text(info.battery)}')
     return '\n'.join(lines) + '\n'
+
+
+def processes_text(processes: Sequence[ProcessInfo], sort_by: str = 'cpu') -> str:
+    if not processes:
+        return f'Processes: {NA}\n'
+    order = 'memory' if sort_by == 'memory' else 'CPU'
+    rows = [[
+        str(p.pid),
+        (p.name or NA)[:30],
+        f'{p.cpu_percent:.1f}%',
+        NA if p.memory_percent is None else f'{p.memory_percent:.1f}%',
+        size_or_na(p.memory_rss),
+        p.username or NA,
+    ] for p in processes]
+    return f'Top {len(processes)} processes by {order}:\n' + table(
+        ['PID', 'NAME', 'CPU%', 'MEM%', 'MEMORY', 'USER'], rows, right={0, 2, 3, 4})

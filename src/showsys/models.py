@@ -147,3 +147,15 @@ class SensorsInfo(Record):
     """``None`` when this OS gives no access to fans (everything but Linux)."""
     battery: Optional[Battery]
     """``None`` when there is no battery."""
+
+
+@dataclass
+class ProcessInfo(Record):
+    pid: int
+    name: Optional[str]
+    username: Optional[str]
+    cpu_percent: float
+    """Share of one core over the measurement window: above 100 for busy multi-threaded programs."""
+    memory_percent: Optional[float]
+    memory_rss: Optional[int]
+    """Resident memory in bytes. ``None`` when the OS denies access to this process."""

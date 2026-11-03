@@ -1,6 +1,7 @@
 """Shared fixtures."""
 import platform
 import socket
+import time
 import uuid
 
 import cpuinfo
@@ -36,4 +37,7 @@ def fake_machine(monkeypatch):
                         raising=False)
     monkeypatch.setattr(psutil, 'sensors_fans', lambda: machine.fans, raising=False)
     monkeypatch.setattr(psutil, 'sensors_battery', lambda: machine.battery, raising=False)
+    monkeypatch.setattr(psutil, 'process_iter', lambda *args, **kwargs: iter(machine.processes))
+    # Measurements wait for real time to pass; the fake machine only records how long.
+    monkeypatch.setattr(time, 'sleep', machine.sleep)
     return machine

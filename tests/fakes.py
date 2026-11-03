@@ -1,4 +1,5 @@
 """A fake machine with fixed values, so showsys output can be compared exactly."""
+import contextlib
 import socket
 from collections import namedtuple
 from datetime import datetime
@@ -19,6 +20,7 @@ NetStats = namedtuple('NetStats', 'isup duplex speed mtu')
 Temperature = namedtuple('Temperature', 'label current high critical')
 Fan = namedtuple('Fan', 'label current')
 Battery = namedtuple('Battery', 'percent secsleft power_plugged')
+MemoryUse = namedtuple('MemoryUse', 'rss vms')
 
 GB = 1024 ** 3
 MB = 1024 ** 2
@@ -72,12 +74,55 @@ class FakeMachine:
         }
         self.fans = {'thinkpad': [Fan('', 2400)]}
         self.battery = Battery(percent=87.0, secsleft=5025, power_plugged=False)
+        self.slept = []
+        self.processes = [
+            FakeProcess(101, 'python', 'nat', cpu=12.34, rss=300 * MB, memory_percent=1.83),
+            FakeProcess(202, 'postgres', 'postgres', cpu=3.0, rss=1 * GB, memory_percent=6.25),
+            FakeProcess(303, 'bash', 'nat', cpu=0.0, rss=4 * MB, memory_percent=0.02),
+        ]
 
     def cpu_percent(self, interval=None, percpu=False):
         return list(self.per_core) if percpu else self.total_cpu
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
 
     def cpu_count(self, logical=True):
         return self.logical_cores if logical else self.physical_cores
 
     def disk_usage_of(self, path):
         return self.disk_usage[path]
+
+
+class FakeProcess:
+    """Just enough of psutil.Process for showsys.get_processes()."""
+
+    def __init__(self, pid, name, username, cpu, rss, memory_percent, error=None, memory_error=None):
+        self.pid = pid
+        self.info = {'name': name, 'username': username}
+        self._cpu = cpu
+        self._rss = rss
+        self._memory_percent = memory_percent
+        self.error = error
+        self.memory_error = memory_error
+        self.cpu_calls = 0
+
+    def oneshot(self):
+        return contextlib.nullcontext()
+
+    def cpu_percent(self, interval=None):
+        if self.error:
+            raise self.error
+        self.cpu_calls += 1
+        # Like psutil: the first call only starts the measurement.
+        return 0.0 if self.cpu_calls == 1 else self._cpu
+
+    def memory_info(self):
+        if self.memory_error:
+            raise self.memory_error
+        return MemoryUse(rss=self._rss, vms=self._rss)
+
+    def memory_percent(self):
+        if self.memory_error:
+            raise self.memory_error
+        return self._memory_percent

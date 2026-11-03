@@ -29,6 +29,7 @@ from .models import (
     NetworkAddress,
     NetworkInfo,
     NetworkInterface,
+    ProcessInfo,
     Record,
     SensorsInfo,
     SwapInfo,
@@ -258,8 +259,83 @@ def get_sensors() -> SensorsInfo:
     )
 
 
+#: Orders accepted by :func:`get_processes`.
+PROCESS_SORT_KEYS: Tuple[str, ...] = ('cpu', 'memory')
+
+
+class _ProcessSampler:
+    """Per-process CPU usage needs two readings: one now and one in :meth:`top`."""
+
+    def __init__(self) -> None:
+        self.started = time.monotonic()
+        self._processes: List[psutil.Process] = []
+        for process in psutil.process_iter(['name', 'username']):
+            if psutil.WINDOWS and process.pid == 0:
+                continue  # "System Idle Process" reports idle time as CPU usage.
+            try:
+                process.cpu_percent(None)
+            except psutil.Error:
+                continue  # Gone already, or the OS denies access.
+            self._processes.append(process)
+
+    def wait(self, interval: float) -> None:
+        """Sleep until ``interval`` seconds have passed since the first reading."""
+        remaining = interval - (time.monotonic() - self.started)
+        if remaining > 0:
+            time.sleep(remaining)
+
+    def top(self, limit: int, sort_by: str) -> List[ProcessInfo]:
+        found = []
+        for process in self._processes:
+            with process.oneshot():
+                try:
+                    cpu = process.cpu_percent(None)
+                except psutil.Error:
+                    continue
+                try:
+                    memory_rss: Optional[int] = process.memory_info().rss
+                    memory_percent: Optional[float] = round(process.memory_percent(), 2)
+                except psutil.NoSuchProcess:
+                    continue
+                except psutil.AccessDenied:
+                    memory_rss = memory_percent = None
+            found.append(ProcessInfo(
+                pid=process.pid,
+                name=process.info.get('name') or None,
+                username=process.info.get('username') or None,
+                cpu_percent=round(cpu, 1),
+                memory_percent=memory_percent,
+                memory_rss=memory_rss,
+            ))
+        if sort_by == 'memory':
+            found.sort(key=lambda p: p.memory_rss or 0, reverse=True)
+        else:
+            found.sort(key=lambda p: p.cpu_percent, reverse=True)
+        return found[:limit]
+
+
+def _check_top(limit: int, sort_by: str) -> None:
+    if limit < 1:
+        raise ValueError('limit must be at least 1')
+    if sort_by not in PROCESS_SORT_KEYS:
+        raise ValueError(f"unknown sort key {sort_by!r}; choose from {', '.join(PROCESS_SORT_KEYS)}")
+
+
+def get_processes(limit: int = 5, sort_by: str = 'cpu',
+                  interval: float = DEFAULT_INTERVAL) -> List[ProcessInfo]:
+    """The ``limit`` busiest processes by ``'cpu'`` or ``'memory'``, CPU measured over ``interval``.
+
+    Processes the OS does not let this user inspect are left out, or listed without memory.
+    """
+    _check_top(limit, sort_by)
+    sampler = _ProcessSampler()
+    sampler.wait(interval)
+    return sampler.top(limit, sort_by)
+
+
 #: Section names accepted by :func:`collect`, in the order they are returned.
-SECTIONS: Tuple[str, ...] = ('system', 'boot', 'cpu', 'memory', 'swap', 'disk', 'network', 'sensors')
+SECTIONS: Tuple[str, ...] = (
+    'system', 'boot', 'cpu', 'memory', 'swap', 'disk', 'network', 'sensors', 'processes')
 
 
 def _check_sections(sections: Sequence[str]) -> List[str]:
@@ -270,8 +346,21 @@ def _check_sections(sections: Sequence[str]) -> List[str]:
     return [name for name in SECTIONS if name in wanted]
 
 
-def gather(sections: Sequence[str] = (), interval: float = DEFAULT_INTERVAL) -> Dict[str, Any]:
+def gather(sections: Sequence[str] = (), interval: float = DEFAULT_INTERVAL,
+           top: int = 5, sort_by: str = 'cpu') -> Dict[str, Any]:
     """Like :func:`collect`, but returns the records themselves instead of dicts."""
+    wanted = _check_sections(sections)
+    sampler = None
+    if 'processes' in wanted:
+        _check_top(top, sort_by)
+        # Start now, so the process measurement overlaps the CPU one instead of adding a second wait.
+        sampler = _ProcessSampler()
+
+    def processes() -> List[ProcessInfo]:
+        assert sampler is not None
+        sampler.wait(interval)
+        return sampler.top(top, sort_by)
+
     getters: Dict[str, Callable[[], Any]] = {
         'system': get_system,
         'boot': get_boot,
@@ -281,8 +370,9 @@ def gather(sections: Sequence[str] = (), interval: float = DEFAULT_INTERVAL) -> 
         'disk': get_disks,
         'network': get_network,
         'sensors': get_sensors,
+        'processes': processes,
     }
-    return {name: getters[name]() for name in _check_sections(sections)}
+    return {name: getters[name]() for name in wanted}
 
 
 def to_jsonable(value: Any) -> Any:
@@ -294,7 +384,8 @@ def to_jsonable(value: Any) -> Any:
     return value
 
 
-def collect(*sections: str, interval: float = DEFAULT_INTERVAL) -> Dict[str, Any]:
+def collect(*sections: str, interval: float = DEFAULT_INTERVAL,
+            top: int = 5, sort_by: str = 'cpu') -> Dict[str, Any]:
     """Collect sections of system information as plain dicts, ready for ``json.dumps``.
 
     Example::
@@ -303,11 +394,12 @@ def collect(*sections: str, interval: float = DEFAULT_INTERVAL) -> Dict[str, Any
         data['memory']['total']        # bytes
         data['cpu']['usage_percent']   # measured over ``interval`` seconds
 
-    Pass no names to get every section. The result also has a ``timestamp`` key with the
-    local time the collection started. Unknown section names raise ``ValueError``.
+    Pass no names to get every section (see :data:`SECTIONS`). The result also has a
+    ``timestamp`` key with the local time the collection started. ``top`` and ``sort_by``
+    apply to the ``processes`` section. Unknown section names raise ``ValueError``.
     """
     started = local_time(time.time())
-    records = gather(sections, interval=interval)
+    records = gather(sections, interval=interval, top=top, sort_by=sort_by)
     result: Dict[str, Any] = {'timestamp': started}
     result.update((name, to_jsonable(record)) for name, record in records.items())
     return result

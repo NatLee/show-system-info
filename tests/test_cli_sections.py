@@ -2,10 +2,12 @@
 import json
 
 import psutil
+import pytest
 
+import showsys
 from showsys.cli import main
 
-from .fakes import GB, Battery, DiskPartition, DiskUsage
+from .fakes import GB, MB, Battery, DiskPartition, DiskUsage, FakeProcess
 
 
 def _text(capsys, *flags):
@@ -112,3 +114,76 @@ def test_sensors_json_lists_every_reading(fake_machine, capsys):
 def test_sensors_work_on_this_machine(capsys):
     assert 'Battery:' in _text(capsys, '--sensors')
     assert set(_json(capsys, '--sensors')['sensors']) == {'temperatures', 'fans', 'battery'}
+
+
+# --top
+
+def test_top_lists_the_busiest_processes(fake_machine, capsys):
+    assert _text(capsys, '--top') == (
+        'Top 3 processes by CPU:\n'
+        'PID  NAME       CPU%  MEM%    MEMORY  USER\n'
+        '101  python    12.3%  1.8%  300.00MB  nat\n'
+        '202  postgres   3.0%  6.2%    1.00GB  postgres\n'
+        '303  bash       0.0%  0.0%    4.00MB  nat\n'
+        '\n')
+    # CPU usage per process is measured over one second.
+    assert fake_machine.slept and fake_machine.slept[0] == pytest.approx(1.0, abs=0.1)
+
+
+def test_top_takes_a_count_and_a_sort_order(fake_machine, capsys):
+    text = _text(capsys, '--top', '2', '--sort', 'memory')
+    assert text.startswith('Top 2 processes by memory:\n')
+    assert [line.split()[1] for line in text.splitlines()[2:4]] == ['postgres', 'python']
+
+
+def test_top_skips_processes_that_are_gone_or_hidden(fake_machine, capsys):
+    fake_machine.processes[0].error = psutil.NoSuchProcess(101)
+    fake_machine.processes[1].memory_error = psutil.AccessDenied(202)
+
+    rows = _json(capsys, '--top')['processes']
+
+    assert [p['pid'] for p in rows] == [202, 303]
+    assert rows[0]['memory_rss'] is None
+    assert rows[0]['memory_percent'] is None
+    assert '202  postgres  3.0%   N/A     N/A  postgres\n' in _text(capsys, '--top')
+
+
+def test_top_leaves_out_the_windows_idle_process(fake_machine, capsys, monkeypatch):
+    monkeypatch.setattr(psutil, 'WINDOWS', True)
+    fake_machine.processes.insert(0, FakeProcess(0, 'System Idle Process', None, cpu=790.0, rss=8 * 1024,
+                                                 memory_percent=0.0))
+    assert [p['pid'] for p in _json(capsys, '--top')['processes']] == [101, 202, 303]
+
+
+def test_top_json_has_numbers(fake_machine, capsys):
+    assert _json(capsys, '--top', '1')['processes'] == [{
+        'pid': 101, 'name': 'python', 'username': 'nat', 'cpu_percent': 12.3,
+        'memory_percent': 1.83, 'memory_rss': 300 * MB}]
+
+
+def test_top_without_processes_is_na(fake_machine, capsys):
+    fake_machine.processes = []
+    assert _text(capsys, '--top') == 'Processes: N/A\n\n'
+
+
+@pytest.mark.parametrize('value', ['0', '-3', 'many'])
+def test_top_rejects_counts_below_one(capsys, value):
+    with pytest.raises(SystemExit) as exc:
+        main(['--top', value])
+    assert exc.value.code == 2
+    assert 'expected a whole number above 0' in capsys.readouterr().err
+
+
+def test_get_processes_rejects_bad_arguments():
+    with pytest.raises(ValueError):
+        showsys.get_processes(limit=0)
+    with pytest.raises(ValueError):
+        showsys.get_processes(sort_by='name')
+
+
+def test_top_works_on_this_machine(capsys):
+    text = _text(capsys, '--top', '3')
+    assert text.startswith('Top ')
+    rows = _json(capsys, '--top', '3', '--sort', 'memory')['processes']
+    assert 1 <= len(rows) <= 3
+    assert all(isinstance(p['pid'], int) for p in rows)

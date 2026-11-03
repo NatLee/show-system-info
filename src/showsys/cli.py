@@ -11,6 +11,7 @@ from .collectors import collect
 from .showsys import ShowSys
 
 ISSUES_URL = 'https://github.com/NatLee/show-system-info/issues'
+DEFAULT_TOP = 5
 
 
 ShowText = Callable[[ShowSys, argparse.Namespace], None]
@@ -49,7 +50,17 @@ VIEWS: Tuple[View, ...] = (
     View('network', ('network',), _print_method('network_info')),
     View('disk', ('disk',), _print_record(render.disk_text, collectors.get_disks)),
     View('sensors', ('sensors',), _print_record(render.sensors_text, collectors.get_sensors)),
+    View('top', ('processes',), lambda sysinfo, args: print(render.processes_text(
+        collectors.get_processes(_top(args), _sort(args)), _sort(args)))),
 )
+
+
+def _top(args: argparse.Namespace) -> int:
+    return getattr(args, 'top', None) or DEFAULT_TOP
+
+
+def _sort(args: argparse.Namespace) -> str:
+    return getattr(args, 'sort', None) or 'cpu'
 
 
 def pick_view(args: argparse.Namespace) -> View:
@@ -80,12 +91,22 @@ def cli(args: argparse.Namespace) -> None:
     try:
         view = pick_view(args)
         if as_json:
-            print(json.dumps(collect(*view.sections), indent=2))
+            print(json.dumps(collect(*view.sections, top=_top(args), sort_by=_sort(args)), indent=2))
         else:
             view.show_text(ShowSys(), args)
     except Exception as e:
         # Keep stdout clean for JSON readers: the report goes to stderr in that mode.
         _report(e, sys.stderr if as_json else sys.stdout)
+
+
+def _positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise argparse.ArgumentTypeError(f'expected a whole number above 0, got {text!r}')
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -104,8 +125,13 @@ def build_parser() -> argparse.ArgumentParser:
                           help='Show disk partitions, their usage, and bytes read and written since boot.')
     sections.add_argument('--sensors', action='store_true',
                           help='Show temperatures, fans and battery, where this OS reports them.')
+    sections.add_argument('--top', nargs='?', const=DEFAULT_TOP, type=_positive_int, metavar='N',
+                          help=f'Show the N busiest processes (default {DEFAULT_TOP}), '
+                               f'CPU measured over one second.')
 
     output = parser.add_argument_group('output')
+    output.add_argument('--sort', choices=collectors.PROCESS_SORT_KEYS, default='cpu',
+                        help='Order --top by CPU or memory use (default: cpu).')
     output.add_argument('-j', '--json', action='store_true',
                         help='Print JSON instead of text: plain numbers (bytes, MHz, percent) and null '
                              'for values this OS does not report.')
