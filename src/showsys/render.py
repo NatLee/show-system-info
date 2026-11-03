@@ -4,7 +4,7 @@ The ``*_dict`` functions build the dicts that the :class:`showsys.ShowSys` metho
 always returned; :func:`enum` prints them. Their output must not change: scripts read it.
 """
 from datetime import datetime
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Collection, Dict, List, Mapping, Optional, Sequence
 
 from .models import BootInfo, CpuInfo, DiskInfo, MemoryInfo, NetworkInfo, SwapInfo, SystemInfo
 
@@ -164,3 +164,27 @@ def enum(info: Mapping[str, Any]) -> str:
 def framed(*sections: Mapping[str, Any]) -> str:
     """Sections between two borders, as printed by ``info()`` and ``detail_info()``."""
     return BORDER + '\n' + ''.join(enum(section) for section in sections) + BORDER
+
+
+# Text for the options added after 1.0 (--disk, ...). These are free to improve.
+
+def table(headers: Sequence[str], rows: Sequence[Sequence[str]], right: Collection[int] = ()) -> str:
+    """Columns separated by two spaces; the columns listed in ``right`` are right-aligned."""
+    widths = [max(len(cell) for cell in column) for column in zip(headers, *rows)]
+    lines = []
+    for row in [headers, *rows]:
+        cells = [cell.rjust(width) if i in right else cell.ljust(width)
+                 for i, (cell, width) in enumerate(zip(row, widths))]
+        lines.append('  '.join(cells).rstrip())
+    return '\n'.join(lines) + '\n'
+
+
+def disk_text(info: DiskInfo) -> str:
+    if info.partitions:
+        rows = [[p.device, p.mountpoint, p.fstype, size(p.total), size(p.used), size(p.free), percent(p.percent)]
+                for p in info.partitions]
+        text = 'Partitions:\n' + table(
+            ['DEVICE', 'MOUNTPOINT', 'TYPE', 'TOTAL', 'USED', 'FREE', 'USE%'], rows, right={3, 4, 5, 6})
+    else:
+        text = f'Partitions: {NA}\n'
+    return text + f'Total read: {size_or_na(info.read_bytes)}\nTotal write: {size_or_na(info.write_bytes)}\n'
