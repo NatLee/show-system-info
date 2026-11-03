@@ -13,7 +13,7 @@ import socket
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import cpuinfo
 import psutil
@@ -27,6 +27,7 @@ from .models import (
     NetworkAddress,
     NetworkInfo,
     NetworkInterface,
+    Record,
     SwapInfo,
     SystemInfo,
 )
@@ -211,3 +212,57 @@ def _interface_stats() -> Dict[str, Any]:
     except Exception:  # noqa: BLE001
         # Link state is an extra: a platform quirk here must never hide the addresses.
         return {}
+
+
+#: Section names accepted by :func:`collect`, in the order they are returned.
+SECTIONS: Tuple[str, ...] = ('system', 'boot', 'cpu', 'memory', 'swap', 'disk', 'network')
+
+
+def _check_sections(sections: Sequence[str]) -> List[str]:
+    unknown = [name for name in sections if name not in SECTIONS]
+    if unknown:
+        raise ValueError(f"unknown section {unknown[0]!r}; choose from {', '.join(SECTIONS)}")
+    wanted = set(sections) if sections else set(SECTIONS)
+    return [name for name in SECTIONS if name in wanted]
+
+
+def gather(sections: Sequence[str] = (), interval: float = DEFAULT_INTERVAL) -> Dict[str, Any]:
+    """Like :func:`collect`, but returns the records themselves instead of dicts."""
+    getters: Dict[str, Callable[[], Any]] = {
+        'system': get_system,
+        'boot': get_boot,
+        'cpu': lambda: get_cpu(interval),
+        'memory': get_memory,
+        'swap': get_swap,
+        'disk': get_disks,
+        'network': get_network,
+    }
+    return {name: getters[name]() for name in _check_sections(sections)}
+
+
+def to_jsonable(value: Any) -> Any:
+    """Records become dicts; lists, dicts and plain values pass through."""
+    if isinstance(value, Record):
+        return value.to_dict()
+    if isinstance(value, list):
+        return [to_jsonable(item) for item in value]
+    return value
+
+
+def collect(*sections: str, interval: float = DEFAULT_INTERVAL) -> Dict[str, Any]:
+    """Collect sections of system information as plain dicts, ready for ``json.dumps``.
+
+    Example::
+
+        data = collect('cpu', 'memory')
+        data['memory']['total']        # bytes
+        data['cpu']['usage_percent']   # measured over ``interval`` seconds
+
+    Pass no names to get every section. The result also has a ``timestamp`` key with the
+    local time the collection started. Unknown section names raise ``ValueError``.
+    """
+    started = local_time(time.time())
+    records = gather(sections, interval=interval)
+    result: Dict[str, Any] = {'timestamp': started}
+    result.update((name, to_jsonable(record)) for name, record in records.items())
+    return result
