@@ -11,11 +11,11 @@ setuptools.setup(
     keywords='system, information, spec, hardware, software, os, platform, cpu, memory, disk, network, cli, command, line, interface, tool, utility',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/natlee/show-system-info',
+    url='https://github.com/NatLee/show-system-info',
     project_urls={
-        'Documentation': 'https://github.com/natlee/show-system-info',
-        'Bug Reports': 'https://github.com/natlee/show-system-info/issues',
-        'Source Code': 'https://github.com/natlee/show-system-info'
+        'Documentation': 'https://github.com/NatLee/show-system-info',
+        'Bug Reports': 'https://github.com/NatLee/show-system-info/issues',
+        'Source Code': 'https://github.com/NatLee/show-system-info'
     },
     package_dir={'': 'src'},
     packages=setuptools.find_packages(where='src'),
@@ -32,6 +32,9 @@ setuptools.setup(
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
         'Programming Language :: Python :: 3 :: Only',
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',
@@ -40,7 +43,7 @@ setuptools.setup(
     install_requires=['psutil', 'py-cpuinfo'],
     extras_require={
         'dev': ['check-manifest'],
-        # 'test': ['coverage'],
+        'test': ['pytest'],
     },
     entry_points={
         'console_scripts': [

@@ -13,6 +13,8 @@ pip install showsys
 
 Visit [ShowSys on PyPI](https://pypi.org/project/ShowSys/) for more details.
 
+ShowSys needs Python 3.7 or newer and works on Linux, Windows and macOS.
+
 ## Usage
 
 ### As a Library
@@ -25,7 +27,9 @@ sysinfo = ShowSys()
 sysinfo.info()
 ```
 
-There are several methods available to display system information. You can use them to display different types of system information.
+`info()` prints a summary (system, memory and swap) and `detail_info()` prints everything (system, boot time, CPU, memory, swap and network). Both also return the text; pass `show=False` to get the text without printing it.
+
+There are several methods available to display system information. Each one returns a dictionary.
 
 - system_information
 - boot_time
@@ -33,6 +37,7 @@ There are several methods available to display system information. You can use t
 - memory_info
 - swap_info
 - network_info
+- disk_info
 
 Just call the method you want to use. For example, you can use the following code to display CPU information.
 
@@ -56,6 +61,11 @@ It will display the following information.
 }
 ```
 
+Some values are not reported on every machine. ShowSys shows them as `N/A` instead of failing, for example:
+
+- the CPU frequencies on many ARM machines and virtual machines,
+- the IP address when the computer's host name cannot be resolved (common on macOS),
+- the disk read and write totals in some containers.
 
 ### Command Line Interface
 
@@ -65,9 +75,31 @@ ShowSys also provides a command line interface. You can use it to display system
 showsys -d # Display system information details
 ```
 
-Other options are available. You can use the following command to see all available options.
+Other options are available.
+
+```bash
+showsys    # Summary: system, memory and swap
+showsys -b # Boot time (--boot_time)
+showsys -m # Memory (--memory)
+showsys -s # Swap (--swap)
+showsys -c # CPU, including usage per core measured over one second (--cpu)
+showsys -n # Network interfaces and their addresses (--network)
+```
+
+Use one option at a time. You can use the following command to see all available options.
 
 ```bash
 showsys -h # Show help
 ```
+
+## Development
+
+```bash
+git clone https://github.com/NatLee/show-system-info.git
+cd show-system-info
+pip install -e ".[test]"
+pytest
+```
+
+`tox -e py` also checks that the source distribution contains every tracked file.
 

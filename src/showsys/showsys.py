@@ -8,6 +8,9 @@ from datetime import datetime
 import psutil
 import cpuinfo
 
+# Shown instead of a value the operating system does not report.
+_NOT_AVAILABLE = "N/A"
+
 class ShowSys:
 
     def get_size(self, bytes, suffix="B") -> str:
@@ -26,10 +29,18 @@ class ShowSys:
             "Version": uname.version,
             "Machine": uname.machine,
             "Processor": uname.processor,
-            "Processor Brand": cpuinfo.get_cpu_info()['brand_raw'],
-            "IP-Address": socket.gethostbyname(socket.gethostname()),
+            # py-cpuinfo leaves out fields it cannot detect.
+            "Processor Brand": cpuinfo.get_cpu_info().get('brand_raw', _NOT_AVAILABLE),
+            "IP-Address": self._ip_address(),
             "Mac-Address": ':'.join(re.findall('..', '%012x' % uuid.getnode())),
         }
+
+    def _ip_address(self) -> str:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except OSError:
+            # The host name is not in DNS or the hosts file (common on macOS and in containers).
+            return _NOT_AVAILABLE
 
     def boot_time(self) -> Dict[str, str]:
         boot_time_timestamp = psutil.boot_time()
@@ -39,13 +50,21 @@ class ShowSys:
         }
 
     def cpu_info(self) -> Dict[str, Union[str, int, float]]:
-        cpufreq = psutil.cpu_freq()
+        # psutil has no cpu_freq() on some platforms (e.g. Apple Silicon Macs).
+        cpufreq = psutil.cpu_freq() if hasattr(psutil, "cpu_freq") else None
+        if cpufreq is None:
+            # The OS does not report CPU frequencies (e.g. many ARM machines and virtual machines).
+            max_freq = min_freq = current_freq = _NOT_AVAILABLE
+        else:
+            max_freq = f"{cpufreq.max:.2f}Mhz"
+            min_freq = f"{cpufreq.min:.2f}Mhz"
+            current_freq = f"{cpufreq.current:.2f}Mhz"
         return {
             "Physical cores": psutil.cpu_count(logical=False),
             "Total cores": psutil.cpu_count(logical=True),
-            "Max Frequency": f"{cpufreq.max:.2f}Mhz",
-            "Min Frequency": f"{cpufreq.min:.2f}Mhz",
-            "Current Frequency": f"{cpufreq.current:.2f}Mhz",
+            "Max Frequency": max_freq,
+            "Min Frequency": min_freq,
+            "Current Frequency": current_freq,
             "CPU Usage Per Core": [f"{percentage}%" for percentage in psutil.cpu_percent(percpu=True, interval=1)],
             "Total CPU Usage": f"{psutil.cpu_percent()}%"
         }
@@ -86,8 +105,12 @@ class ShowSys:
             except PermissionError:
                 continue
         disk_io = psutil.disk_io_counters()
-        disk_info["Total read"] = self.get_size(disk_io.read_bytes)
-        disk_info["Total write"] = self.get_size(disk_io.write_bytes)
+        if disk_io is None:
+            # No disk statistics are available (e.g. in some containers).
+            disk_info["Total read"] = disk_info["Total write"] = _NOT_AVAILABLE
+        else:
+            disk_info["Total read"] = self.get_size(disk_io.read_bytes)
+            disk_info["Total write"] = self.get_size(disk_io.write_bytes)
         return disk_info
 
     def network_info(self) -> Dict[str, Union[str, int, float]]:
@@ -96,13 +119,15 @@ class ShowSys:
         for interface_name, interface_addresses in if_addrs.items():
             addresses = []
             for address in interface_addresses:
-                if str(address.family) == 'AddressFamily.AF_INET':
+                # Compare the values, not their text: str() of these enums changed in Python 3.11.
+                # psutil.AF_LINK is the MAC address family on every OS (AF_PACKET only exists on Linux).
+                if address.family == socket.AF_INET:
                     addresses.append({
                         "IP Address": address.address,
                         "Netmask": address.netmask,
                         "Broadcast IP": address.broadcast
                     })
-                elif str(address.family) == 'AddressFamily.AF_PACKET':
+                elif address.family == psutil.AF_LINK:
                     addresses.append({
                         "MAC Address": address.address,
                         "Netmask": address.netmask,
