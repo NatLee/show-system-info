@@ -19,6 +19,8 @@ setuptools.setup(
     },
     package_dir={'': 'src'},
     packages=setuptools.find_packages(where='src'),
+    # py.typed: tells type checkers that showsys ships its own type hints (PEP 561).
+    package_data={'showsys': ['py.typed']},
     classifiers=[
         # see https://pypi.org/classifiers/
         'Development Status :: 5 - Production/Stable',
@@ -36,6 +38,7 @@ setuptools.setup(
         'Programming Language :: Python :: 3.13',
         'Programming Language :: Python :: 3.14',
         'Programming Language :: Python :: 3 :: Only',
+        'Typing :: Typed',
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',
     ],

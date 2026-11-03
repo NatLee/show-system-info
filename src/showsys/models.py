@@ -8,12 +8,13 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
 
+@dataclass
 class Record:
     """Base class for every record."""
 
     def to_dict(self) -> Dict[str, Any]:
         """Return the record as a dict that ``json.dumps`` accepts."""
-        return asdict(self)  # type: ignore[call-overload]
+        return asdict(self)
 
 
 @dataclass

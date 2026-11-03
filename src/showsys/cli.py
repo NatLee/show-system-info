@@ -16,7 +16,8 @@ ISSUES_URL = 'https://github.com/NatLee/show-system-info/issues'
 DEFAULT_TOP = 5
 
 
-ShowText = Callable[[ShowSys, argparse.Namespace], None]
+# Prints a view as text. ShowSys.info() and detail_info() also return the text; it is ignored.
+ShowText = Callable[[ShowSys, argparse.Namespace], object]
 
 
 class View(NamedTuple):
