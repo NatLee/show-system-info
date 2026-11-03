@@ -75,6 +75,16 @@ If you pass several sections, the first one in this table wins, as it always has
 
 `python -m showsys` works like the `showsys` command, which helps when the scripts folder is not on `PATH`.
 
+### Exit status
+
+| Status | Meaning |
+|---|---|
+| `0` | It worked, including when you stop `--watch` with Ctrl+C |
+| `1` | Something failed. The error report is printed (on stderr with `--json`) |
+| `2` | The options were wrong (for example `--top 0`) |
+
+Up to 1.1.0, `showsys` exited with `0` even when it failed.
+
 ### Live mode
 
 `--watch` prints one line per reading. Each line covers the time since the previous one, so the rates
@@ -124,7 +134,7 @@ $ showsys --memory --json
 - `timestamp` is the local time when the collection started.
 - The sections are `system`, `boot`, `cpu`, `memory`, `swap`, `network`, `disk`, `sensors`,
   `processes` and `gpu`. `showsys --all --json` has all of them.
-- If something goes wrong, the error goes to stderr, so stdout never holds half a document.
+- If something goes wrong, the error goes to stderr, so stdout never holds half a document, and the exit status is `1`.
 
 For example, the memory use in a shell script:
 

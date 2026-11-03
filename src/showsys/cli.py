@@ -14,6 +14,10 @@ from .collectors import collect
 from .showsys import ShowSys
 
 ISSUES_URL = 'https://github.com/NatLee/show-system-info/issues'
+
+# Exit statuses, decided only in cli(). argparse exits with 2 on its own for usage errors.
+EXIT_OK = 0
+EXIT_FAILURE = 1
 DEFAULT_TOP = 5
 
 
@@ -89,18 +93,19 @@ def _report(error: Exception, out: TextIO) -> None:
     print(f'-> {ISSUES_URL}', file=out)
 
 
-def cli(args: argparse.Namespace) -> None:
+def cli(args: argparse.Namespace) -> int:
     """
     Command-line interface for the ShowSys package.
 
     :param args: Parsed command-line arguments.
+    :return: The exit status: ``EXIT_OK`` (0), or ``EXIT_FAILURE`` (1) after reporting an error.
     """
     # getattr: callers that build the Namespace themselves may not set the newer options.
     as_json = getattr(args, 'json', False)
     try:
         if getattr(args, 'watch', None):
             _watch(args.watch, getattr(args, 'count', None), as_json)
-            return
+            return EXIT_OK
         view = pick_view(args)
         if as_json:
             print(json.dumps(collect(*view.sections, top=_top(args), sort_by=_sort(args)), indent=2))
@@ -109,6 +114,8 @@ def cli(args: argparse.Namespace) -> None:
     except Exception as e:
         # Keep stdout clean for JSON readers: the report goes to stderr in that mode.
         _report(e, sys.stderr if as_json else sys.stdout)
+        return EXIT_FAILURE
+    return EXIT_OK
 
 
 def _watch(interval: float, count: Optional[int], as_json: bool) -> None:
@@ -192,11 +199,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[List[str]] = None) -> None:
+def main(argv: Optional[List[str]] = None) -> int:
     """
     Main entry point for the `showsys` command-line interface.
 
     :param argv: Command-line arguments without the program name. Defaults to ``sys.argv[1:]``.
+    :return: The exit status from :func:`cli`. The ``showsys`` script and ``python -m showsys``
+        pass it to ``sys.exit()``.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -204,4 +213,4 @@ def main(argv: Optional[List[str]] = None) -> None:
         parser.error('--count only works together with --watch')
     if args.watch is not None and any(getattr(args, view.option) for view in VIEWS):
         parser.error('--watch has its own columns; leave out the section options')
-    cli(args)
+    return cli(args)
