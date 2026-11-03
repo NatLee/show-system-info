@@ -19,17 +19,21 @@ import cpuinfo
 import psutil
 
 from .models import (
+    Battery,
     BootInfo,
     CpuInfo,
     DiskInfo,
     DiskPartition,
+    Fan,
     MemoryInfo,
     NetworkAddress,
     NetworkInfo,
     NetworkInterface,
     Record,
+    SensorsInfo,
     SwapInfo,
     SystemInfo,
+    Temperature,
 )
 
 #: Seconds `get_cpu()` waits to measure CPU usage, same as ShowSys 1.0.
@@ -214,8 +218,48 @@ def _interface_stats() -> Dict[str, Any]:
         return {}
 
 
+def _read_sensor(name: str) -> Any:
+    """The result of ``psutil.<name>()``, or None when this OS lacks it or it fails."""
+    read = getattr(psutil, name, None)
+    if read is None:
+        return None
+    try:
+        return read()
+    except Exception:  # noqa: BLE001
+        # Sensors are best effort: unusual hardware drivers make psutil raise all sorts of errors.
+        return None
+
+
+def _seconds_left(secsleft: Optional[int]) -> Optional[int]:
+    # psutil uses negative values for "unlimited" (charging) and "unknown".
+    return int(secsleft) if secsleft is not None and secsleft >= 0 else None
+
+
+def get_sensors() -> SensorsInfo:
+    """Temperatures (Linux, FreeBSD), fans (Linux) and the battery (laptops on every OS)."""
+    temperatures = _read_sensor('sensors_temperatures')
+    fans = _read_sensor('sensors_fans')
+    battery = _read_sensor('sensors_battery')
+    return SensorsInfo(
+        temperatures=None if temperatures is None else [
+            Temperature(sensor=name, label=entry.label or None, current=entry.current,
+                        high=entry.high, critical=entry.critical)
+            for name, entries in temperatures.items() for entry in entries
+        ],
+        fans=None if fans is None else [
+            Fan(sensor=name, label=entry.label or None, rpm=entry.current)
+            for name, entries in fans.items() for entry in entries
+        ],
+        battery=None if battery is None else Battery(
+            percent=round(battery.percent, 1),
+            seconds_left=_seconds_left(battery.secsleft),
+            power_plugged=battery.power_plugged,
+        ),
+    )
+
+
 #: Section names accepted by :func:`collect`, in the order they are returned.
-SECTIONS: Tuple[str, ...] = ('system', 'boot', 'cpu', 'memory', 'swap', 'disk', 'network')
+SECTIONS: Tuple[str, ...] = ('system', 'boot', 'cpu', 'memory', 'swap', 'disk', 'network', 'sensors')
 
 
 def _check_sections(sections: Sequence[str]) -> List[str]:
@@ -236,6 +280,7 @@ def gather(sections: Sequence[str] = (), interval: float = DEFAULT_INTERVAL) -> 
         'swap': get_swap,
         'disk': get_disks,
         'network': get_network,
+        'sensors': get_sensors,
     }
     return {name: getters[name]() for name in _check_sections(sections)}
 

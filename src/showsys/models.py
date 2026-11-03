@@ -111,3 +111,39 @@ class NetworkInfo(Record):
     bytes_sent: Optional[int]
     """Bytes sent since boot, over all interfaces."""
     bytes_recv: Optional[int]
+
+
+@dataclass
+class Temperature(Record):
+    sensor: str
+    """The chip or driver, for example ``coretemp``."""
+    label: Optional[str]
+    current: float
+    """Degrees Celsius, like ``high`` and ``critical``."""
+    high: Optional[float]
+    critical: Optional[float]
+
+
+@dataclass
+class Fan(Record):
+    sensor: str
+    label: Optional[str]
+    rpm: int
+
+
+@dataclass
+class Battery(Record):
+    percent: float
+    seconds_left: Optional[int]
+    """``None`` while charging or when the OS cannot estimate it."""
+    power_plugged: Optional[bool]
+
+
+@dataclass
+class SensorsInfo(Record):
+    temperatures: Optional[List[Temperature]]
+    """``None`` when this OS gives no access to temperatures (Windows, macOS)."""
+    fans: Optional[List[Fan]]
+    """``None`` when this OS gives no access to fans (everything but Linux)."""
+    battery: Optional[Battery]
+    """``None`` when there is no battery."""

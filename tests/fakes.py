@@ -16,6 +16,9 @@ DiskIO = namedtuple('DiskIO', 'read_count write_count read_bytes write_bytes')
 Address = namedtuple('Address', 'family address netmask broadcast ptp')
 NetIO = namedtuple('NetIO', 'bytes_sent bytes_recv packets_sent packets_recv errin errout dropin dropout')
 NetStats = namedtuple('NetStats', 'isup duplex speed mtu')
+Temperature = namedtuple('Temperature', 'label current high critical')
+Fan = namedtuple('Fan', 'label current')
+Battery = namedtuple('Battery', 'percent secsleft power_plugged')
 
 GB = 1024 ** 3
 MB = 1024 ** 2
@@ -63,6 +66,12 @@ class FakeMachine:
         }
         self.net_io = NetIO(bytes_sent=int(1.5 * MB), bytes_recv=20 * MB,
                             packets_sent=0, packets_recv=0, errin=0, errout=0, dropin=0, dropout=0)
+        self.temperatures = {
+            'coretemp': [Temperature('Package id 0', 45.0, 80.0, 100.0), Temperature('Core 0', 43.5, 80.0, 100.0)],
+            'acpitz': [Temperature('', 27.8, None, None)],
+        }
+        self.fans = {'thinkpad': [Fan('', 2400)]}
+        self.battery = Battery(percent=87.0, secsleft=5025, power_plugged=False)
 
     def cpu_percent(self, interval=None, percpu=False):
         return list(self.per_core) if percpu else self.total_cpu

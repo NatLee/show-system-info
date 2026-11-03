@@ -31,4 +31,9 @@ def fake_machine(monkeypatch):
     monkeypatch.setattr(psutil, 'net_if_addrs', lambda: machine.interfaces)
     monkeypatch.setattr(psutil, 'net_if_stats', lambda: machine.interface_stats)
     monkeypatch.setattr(psutil, 'net_io_counters', lambda *args, **kwargs: machine.net_io)
+    # raising=False: psutil has no temperatures or fans on Windows and macOS.
+    monkeypatch.setattr(psutil, 'sensors_temperatures', lambda *args, **kwargs: machine.temperatures,
+                        raising=False)
+    monkeypatch.setattr(psutil, 'sensors_fans', lambda: machine.fans, raising=False)
+    monkeypatch.setattr(psutil, 'sensors_battery', lambda: machine.battery, raising=False)
     return machine

@@ -8,6 +8,7 @@ from .collectors import (
     get_disks,
     get_memory,
     get_network,
+    get_sensors,
     get_swap,
     get_system,
 )
@@ -23,6 +24,7 @@ __all__ = [
     'get_disks',
     'get_memory',
     'get_network',
+    'get_sensors',
     'get_swap',
     'get_system',
     'main',

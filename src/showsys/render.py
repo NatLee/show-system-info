@@ -3,10 +3,20 @@
 The ``*_dict`` functions build the dicts that the :class:`showsys.ShowSys` methods have
 always returned; :func:`enum` prints them. Their output must not change: scripts read it.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Collection, Dict, List, Mapping, Optional, Sequence
 
-from .models import BootInfo, CpuInfo, DiskInfo, MemoryInfo, NetworkInfo, SwapInfo, SystemInfo
+from .models import (
+    Battery,
+    BootInfo,
+    CpuInfo,
+    DiskInfo,
+    MemoryInfo,
+    NetworkInfo,
+    SensorsInfo,
+    SwapInfo,
+    SystemInfo,
+)
 
 #: Shown instead of a value the operating system does not report.
 NA = 'N/A'
@@ -188,3 +198,43 @@ def disk_text(info: DiskInfo) -> str:
     else:
         text = f'Partitions: {NA}\n'
     return text + f'Total read: {size_or_na(info.read_bytes)}\nTotal write: {size_or_na(info.write_bytes)}\n'
+
+
+def _celsius(value: float) -> str:
+    # ASCII only: a degree sign can fail on Windows consoles with a legacy code page.
+    return f'{value:.1f}C'
+
+
+def _name(sensor: str, label: Optional[str]) -> str:
+    return f'{sensor} {label}' if label else sensor
+
+
+def _battery_text(battery: Optional[Battery]) -> str:
+    if battery is None:
+        return NA
+    parts = [percent(battery.percent)]
+    if battery.power_plugged is not None:
+        parts.append('plugged in' if battery.power_plugged else 'on battery')
+    if battery.seconds_left is not None:
+        parts.append(f'{timedelta(seconds=battery.seconds_left)} left')
+    return ', '.join(parts)
+
+
+def sensors_text(info: SensorsInfo) -> str:
+    lines = []
+    if info.temperatures:
+        lines.append('Temperatures:')
+        for t in info.temperatures:
+            limits = [f'{name} {_celsius(value)}'
+                      for name, value in (('high', t.high), ('critical', t.critical)) if value]
+            extra = f" ({', '.join(limits)})" if limits else ''
+            lines.append(f'\t{_name(t.sensor, t.label)}: {_celsius(t.current)}{extra}')
+    else:
+        lines.append(f'Temperatures: {NA}')
+    if info.fans:
+        lines.append('Fans:')
+        lines.extend(f'\t{_name(fan.sensor, fan.label)}: {fan.rpm} RPM' for fan in info.fans)
+    else:
+        lines.append(f'Fans: {NA}')
+    lines.append(f'Battery: {_battery_text(info.battery)}')
+    return '\n'.join(lines) + '\n'

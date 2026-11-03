@@ -3,7 +3,7 @@ import argparse
 import json
 import sys
 import traceback
-from typing import Callable, List, NamedTuple, Optional, TextIO, Tuple
+from typing import Any, Callable, List, NamedTuple, Optional, TextIO, Tuple
 
 from . import __version__
 from . import collectors, render
@@ -13,16 +13,26 @@ from .showsys import ShowSys
 ISSUES_URL = 'https://github.com/NatLee/show-system-info/issues'
 
 
+ShowText = Callable[[ShowSys, argparse.Namespace], None]
+
+
 class View(NamedTuple):
     """One thing ``showsys`` can show: the option that selects it, its sections and its text."""
     option: str
     sections: Tuple[str, ...]
-    show_text: Callable[[ShowSys, argparse.Namespace], None]
+    show_text: ShowText
 
 
-def _print_method(method: str) -> Callable[[ShowSys, argparse.Namespace], None]:
+def _print_method(method: str) -> ShowText:
+    """Text of the options from ShowSys 1.0: exactly what they have always printed."""
     def show(sysinfo: ShowSys, args: argparse.Namespace) -> None:
         print(sysinfo.enum(getattr(sysinfo, method)()))
+    return show
+
+
+def _print_record(text: Callable[[Any], str], get: Callable[[], Any]) -> ShowText:
+    def show(sysinfo: ShowSys, args: argparse.Namespace) -> None:
+        print(text(get()))
     return show
 
 
@@ -37,7 +47,8 @@ VIEWS: Tuple[View, ...] = (
     View('swap', ('swap',), _print_method('swap_info')),
     View('cpu', ('cpu',), _print_method('cpu_info')),
     View('network', ('network',), _print_method('network_info')),
-    View('disk', ('disk',), lambda sysinfo, args: print(render.disk_text(collectors.get_disks()))),
+    View('disk', ('disk',), _print_record(render.disk_text, collectors.get_disks)),
+    View('sensors', ('sensors',), _print_record(render.sensors_text, collectors.get_sensors)),
 )
 
 
@@ -91,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     sections.add_argument('-n', '--network', action='store_true', help='Show network information.')
     sections.add_argument('--disk', action='store_true',
                           help='Show disk partitions, their usage, and bytes read and written since boot.')
+    sections.add_argument('--sensors', action='store_true',
+                          help='Show temperatures, fans and battery, where this OS reports them.')
 
     output = parser.add_argument_group('output')
     output.add_argument('-j', '--json', action='store_true',
