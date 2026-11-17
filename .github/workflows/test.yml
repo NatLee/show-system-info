@@ -16,10 +16,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
+        # A fixed image, not ubuntu-latest: setup-python only has each Python for the images that were
+        # current while that Python was supported, and ubuntu-latest moved to 26.04 in October 2026,
+        # which has no 3.8 or 3.9. Move this on when GitHub retires 24.04.
+        os: [ubuntu-24.04]
         python: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
-          # The newest Ubuntu image no longer ships Python 3.7, which the package still supports.
+          # setup-python has no Python 3.7 build for 24.04 (the package still supports 3.7); 22.04 has one.
           - os: ubuntu-22.04
             python: "3.7"
           # The package is marked "OS Independent": also run on Windows and macOS.
